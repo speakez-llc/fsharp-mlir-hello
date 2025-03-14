@@ -98,3 +98,15 @@ This is an MIT licensed open-source research project. Contributions, discussions
 ## Disclaimer
 
 This compiler pipeline is a proof-of-concept. It is not intended for production use and represents an experimental approach to functional language compilation.
+
+## .NET 9 compilation sizes for the same functionality
+
+### Standard Debug Build
+
+![alt text](<Screenshot 2025-03-13 224831.png>)
+
+### Production build
+
+![alt text](<Screenshot 2025-03-13 230147.png>)
+
+![alt text](<Screenshot 2025-03-13 225719.png>)
