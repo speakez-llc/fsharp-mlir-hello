@@ -1,6 +1,6 @@
 # F# to Native Executable Compiler Pipeline
 
-![alt text](<Screenshot 2025-03-13 211122.png>)
+![alt text](FSharp-MLIR-LLVM.png)
 
 ## Project Overview
 
@@ -13,6 +13,8 @@
 
 
 This project represents an experimental proof-of-concept for compiling F# directly to native executables using MLIR (Multi-Level Intermediate Representation) and LLVM, bypassing traditional .NET compilation infrastructure.
+
+![alt text](<Screenshot 2025-03-13 211122.png>)
 
 ## MLIR and LLVM Toolchain Setup with MSYS2 Windows Installer
 
