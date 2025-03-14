@@ -41,7 +41,7 @@ if (-not (Test-Path -Path $fscPath)) {
 }
 
 # Path to our custom FSharpCompilerService.dll
-$fscsPath = "$projectRoot\FSharpCompilerService\bin\Debug\net6.0\FSharpCompilerService.dll"
+$fscsPath = "$projectRoot\FSharpCompilerService\bin\Debug\net6.0\FSharp.Compiler.Service.dll"
 
 # Create build directory if it doesn't exist
 if (-not (Test-Path -Path $buildDir)) {
