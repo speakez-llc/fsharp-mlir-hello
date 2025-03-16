@@ -85,11 +85,14 @@ Current limitations include:
 - Minimal language feature support
 - Experimental parsing mechanisms
 - Limited optimization strategies
+- No Garbage Collection (GC)
 
 Potential future improvements:
 - Enhanced type system mapping
 - More comprehensive language construct support
 - Advanced optimization passes
+- Memory management
+- Garbage Collection
 
 ## Licensing and Contribution
 
