@@ -1,5 +1,14 @@
 # F# to Native Executable Compiler Pipeline
 
+<table>
+  <tr>
+    <td align="center" width="100%">
+      <strong>⚠️ Caution: Experimental ⚠️</strong><br>
+      This project is in early development and not ready for production use.
+    </td>
+  </tr>
+</table>
+
 ![alt text](FSharp-MLIR-LLVM.png)
 
 ## Project Overview
