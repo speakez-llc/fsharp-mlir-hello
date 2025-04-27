@@ -4,7 +4,7 @@
   <tr>
     <td align="center" width="100%">
       <strong>⚠️ Caution: Experimental ⚠️</strong><br>
-      This project is in early development and not ready for production use.
+      This project is in early development and intended for production use.
     </td>
   </tr>
 </table>
