@@ -45,6 +45,10 @@ type Converter(context: MLIRContext) =
     // Convert a value binding to an MLIR function
     member this.ConvertBinding(mlirModule: MLIRModule, binding: obj) =
         let bindingType = binding.GetType()
+
+        let isMutableProp = bindingType.GetProperty("IsMutable")
+        let isMutable = if isMutableProp <> null then isMutableProp.GetValue(binding) :?> bool else false
+    
         
         // Safely extract function name using reflection
         let functionName = 
@@ -62,9 +66,8 @@ type Converter(context: MLIRContext) =
             with 
             | _ -> "unnamed_function"
         
-        printfn "Converting function: %s" functionName
+        printfn "Converting function: %s (mutable: %b)" functionName isMutable
         
-        // In a real implementation, you would create an MLIR function here
         let functionType = nativeint 0 // Placeholder
         let functionOp = this.CreateFunctionOp(mlirModule, functionName, functionType)
         
@@ -72,6 +75,7 @@ type Converter(context: MLIRContext) =
         try
             let exprProperty = bindingType.GetProperty("Expr")
             let expr = exprProperty.GetValue(binding)
+            this.ConvertExpression(expr) 
             
             // Check for printf-like expressions
             let exprType = expr.GetType()
@@ -92,12 +96,75 @@ type Converter(context: MLIRContext) =
                         this.ConvertPrintf(functionOp, arg)
         with 
         | _ -> printfn "Could not process function body"
+
+    member this.ConvertExpression(expr: obj) =
+        let exprType = expr.GetType()
+        printfn "Converting expression type: %s" exprType.Name
+        
+        match exprType.Name with
+        | "SynExpr+While" ->
+            // Handle while loop
+            try
+                let whileExprProp = exprType.GetProperty("WhileExpr") 
+                let doExprProp = exprType.GetProperty("DoExpr")
+                
+                let condition = whileExprProp.GetValue(expr)
+                let body = doExprProp.GetValue(expr)
+                
+                printfn "  Found while loop"
+                printfn "  TODO: Generate MLIR blocks for loop"
+                
+                // For now, just recurse on body
+                this.ConvertExpression(body)
+            with _ -> printfn "  Error processing while loop"
+            
+        | "SynExpr+Sequential" ->
+            // Handle sequence of expressions
+            try
+                let expr1Prop = exprType.GetProperty("Expr1")
+                let expr2Prop = exprType.GetProperty("Expr2")
+                
+                let expr1 = expr1Prop.GetValue(expr)
+                let expr2 = expr2Prop.GetValue(expr)
+                
+                this.ConvertExpression(expr1)
+                this.ConvertExpression(expr2)
+            with _ -> printfn "  Error processing sequence"
+            
+        | "SynExpr+App" ->
+            // Existing printf handling
+            this.ConvertApp(expr)
+            
+        | "SynExpr+LongIdentSet" ->
+            // Handle assignment (x <- x + 1)
+            printfn "  Found assignment"
+            
+        | "SynExpr+Ident" ->
+            // Handle identifier
+            printfn "  Found identifier"
+            
+        | _ ->
+            printfn "  Unhandled expression: %s" exprType.Name
     
     // Helper to create a function operation in MLIR
     member this.CreateFunctionOp(mlirModule: MLIRModule, name: string, funcType: nativeint) =
         printfn "Creating MLIR function: %s" name
         // In a real implementation, you would create an MLIR function operation
         mlirModule.Handle
+
+    member this.ConvertFunctionCall(funcName: string, args: obj list) =
+        match funcName with
+        | "Time.currentUnixTimestamp" ->
+            printfn "Found call to Alloy Time.currentUnixTimestamp"
+            // Generate: %result = llvm.call @Alloy_Time_currentUnixTimestamp() : () -> i64
+            
+        | "Time.sleep" ->
+            printfn "Found call to Alloy Time.sleep"
+            // Generate: llvm.call @Alloy_Time_sleep(%arg) : (i32) -> ()
+            
+        | _ ->
+            // Handle other functions
+            printfn "Found call to: %s" funcName
     
     // Helper to convert printf expressions to MLIR operations
     member this.ConvertPrintf(functionOp: nativeint, arg: obj) =
