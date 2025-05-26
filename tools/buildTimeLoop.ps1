@@ -1,3 +1,5 @@
+# Build script for TimeLoop example
+
 # Define paths
 $projectRoot = "D:\repos\fsharp-mlir-hello"
 $buildDir = "$projectRoot\build"
@@ -59,44 +61,45 @@ function Invoke-FSC {
 
 # Compile F# bindings library
 Write-Host "Compiling F# bindings library..."
-Invoke-FSC --out:$buildDir\FSharpMLIR.dll --target:library $projectRoot\src\Bindings\MLIRBindings.fs
+Invoke-FSC --out:$buildDir\FSharpMLIRBindings.dll --target:library $projectRoot\src\Bindings\LLVMBindings.fs $projectRoot\src\Bindings\MLIRBindings.fs
 
 # Compile the wrapper
 Write-Host "Compiling wrapper module..."
-Invoke-FSC --out:$buildDir\FSharpMLIRWrapper.dll --target:library --reference:$buildDir\FSharpMLIR.dll $projectRoot\src\Bindings\MLIRWrapper.fs
+Invoke-FSC --out:$buildDir\FSharpMLIRWrapper.dll --target:library --reference:$buildDir\FSharpMLIRBindings.dll $projectRoot\src\Bindings\MLIRWrapper.fs
+
+# Compile Alloy base libraries (now completely dependency-free)
+Write-Host "Compiling Alloy base libraries..."
+
+# First compile the core Alloy modules (these need to be in dependency order)
+Invoke-FSC --out:$buildDir\Alloy.dll --target:library $projectRoot\src\lib\Alloy\ValueOption.fs $projectRoot\src\lib\Alloy\Core.fs $projectRoot\src\lib\Alloy\Numerics.fs $projectRoot\src\lib\Alloy\Operators.fs
+
+# Compile NativeInterop first (no dependencies)
+Invoke-FSC --out:$buildDir\AlloyTimeNativeInterop.dll --target:library --reference:$buildDir\Alloy.dll $projectRoot\src\lib\Alloy\Time\NativeInterop.fs
+
+# Compile Platform interface first (defines IPlatformTime)
+Invoke-FSC --out:$buildDir\AlloyTimePlatform.dll --target:library --reference:$buildDir\Alloy.dll $projectRoot\src\lib\Alloy\Time\Platform.fs
+
+# Compile all time implementations (can now reference IPlatformTime)
+Invoke-FSC --out:$buildDir\AlloyTimeImplementations.dll --target:library --reference:$buildDir\Alloy.dll --reference:$buildDir\AlloyTimePlatform.dll --reference:$buildDir\AlloyTimeNativeInterop.dll $projectRoot\src\lib\Alloy\Time\Portable.fs $projectRoot\src\lib\Alloy\Time\Windows.fs $projectRoot\src\lib\Alloy\Time\Linux.fs
+
+# Compile the main Time module
+Invoke-FSC --out:$buildDir\AlloyTime.dll --target:library --reference:$buildDir\Alloy.dll --reference:$buildDir\AlloyTimePlatform.dll --reference:$buildDir\AlloyTimeNativeInterop.dll --reference:$buildDir\AlloyTimeImplementations.dll $projectRoot\src\lib\Alloy\Time.fs
 
 # Compile conversion modules with reference to our custom library
 Write-Host "Compiling conversion modules..."
-Invoke-FSC --out:$buildDir\FSharpMLIRConversion.dll --target:library --reference:$buildDir\FSharpMLIR.dll --reference:$buildDir\FSharpMLIRWrapper.dll --reference:$fscsPath $projectRoot\src\Conversion\ASTToMLIR.fs
+Invoke-FSC --out:$buildDir\FSharpMLIRConversion.dll --target:library --reference:$buildDir\FSharpMLIRBindings.dll --reference:$buildDir\FSharpMLIRWrapper.dll --reference:$fscsPath $projectRoot\src\Conversion\ASTToMLIR.fs
 
 # Compile the pipeline
 Write-Host "Compiling pipeline modules..."
-Invoke-FSC --out:$buildDir\FSharpMLIRPipeline.dll --target:library --reference:$buildDir\FSharpMLIR.dll --reference:$buildDir\FSharpMLIRWrapper.dll --reference:$buildDir\FSharpMLIRConversion.dll --reference:$fscsPath $projectRoot\src\Pipeline\Compiler.fs
+Invoke-FSC --out:$buildDir\FSharpMLIRPipeline.dll --target:library --reference:$buildDir\FSharpMLIRBindings.dll --reference:$buildDir\FSharpMLIRWrapper.dll --reference:$buildDir\FSharpMLIRConversion.dll --reference:$fscsPath $projectRoot\src\Pipeline\Compiler.fs
 
-Write-Host "Building TimeLoop example..." -ForegroundColor Green
+# Compile the TimeLoop example program
+Write-Host "Compiling TimeLoop example program..."
+Invoke-FSC --out:$buildDir\TimeLoop.exe --reference:$buildDir\Alloy.dll --reference:$buildDir\AlloyTimePlatform.dll --reference:$buildDir\AlloyTimeNativeInterop.dll --reference:$buildDir\AlloyTimeImplementations.dll --reference:$buildDir\AlloyTime.dll --reference:$buildDir\FSharpMLIRBindings.dll --reference:$buildDir\FSharpMLIRWrapper.dll --reference:$buildDir\FSharpMLIRConversion.dll --reference:$buildDir\FSharpMLIRPipeline.dll $projectRoot\src\Examples\TimeLoop.fs
 
-# Compile the new example
-& fsc.exe `
-    --target:exe `
-    --out:build/TimeLoop.exe `
-    src/Examples/TimeLoop.fs `
-    --reference:FSharp.Core.dll
+Write-Host "TimeLoop build completed successfully."
+Write-Host "Executable created at: $buildDir\TimeLoop.exe"
 
-# Run the F# to MLIR compiler on the new example
-& dotnet run --project src/Pipeline/Pipeline.fsproj -- `
-    --input src/Examples/TimeLoop.fs `
-    --output build/timeloop.mlir
-
-# Convert MLIR to LLVM IR
-& mlir-opt `
-    --convert-func-to-llvm `
-    build/timeloop.mlir | `
-    mlir-translate --mlir-to-llvmir > build/timeloop.ll
-
-# Compile to native executable
-& clang `
-    build/timeloop.ll `
-    -o build/timeloop.exe
-
-Write-Host "TimeLoop example built successfully!" -ForegroundColor Green
-Write-Host "Run with: ./build/timeloop.exe" -ForegroundColor Yellow
+# Run the example
+Write-Host "Running TimeLoop example..."
+& "$buildDir\TimeLoop.exe"

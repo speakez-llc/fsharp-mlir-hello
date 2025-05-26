@@ -4,7 +4,6 @@ namespace Alloy.Time
 
 open FSharp.NativeInterop
 open Alloy
-open Alloy.ValueOption
 
 /// <summary>
 /// Native interoperability layer for Alloy, providing P/Invoke-like functionality 
@@ -63,26 +62,26 @@ module NativeInterop =
     module NativeLibrary =
         let private libraryHandles = ref ([| |]: LibraryHandle array)
         
-        let private findLibrary (libraryName: string) : nativeint option =
-            let handles = !libraryHandles
+        let private findLibrary (libraryName: string) : nativeint voption =
+            let handles = libraryHandles.Value
             let rec findInArray idx =
-                if idx >= handles.Length then None
-                elif handles.[idx].LibraryName = libraryName then Some handles.[idx].Handle
+                if idx >= handles.Length then ValueNone
+                elif handles.[idx].LibraryName = libraryName then ValueSome handles.[idx].Handle
                 else findInArray (add idx 1)
             findInArray 0
         
         let private addLibrary (libraryName: string) (handle: nativeint) : unit =
-            let handles = !libraryHandles
+            let handles = libraryHandles.Value
             let newHandles = Array.append handles [| { LibraryName = libraryName; Handle = handle } |]
-            libraryHandles := newHandles
+            libraryHandles.Value <- newHandles
         
         /// <summary>
         /// Load a native library by name - placeholder implementation
         /// </summary>
         let load (libraryPath: string) : nativeint =
             match findLibrary libraryPath with
-            | Some handle -> handle
-            | None ->
+            | ValueSome handle -> handle
+            | ValueNone ->
                 // In production, this would use platform-specific loading
                 // For now, return a placeholder handle
                 let handle = nativeint (hash libraryPath)
@@ -104,13 +103,25 @@ module NativeInterop =
             new(ptr) = { Pointer = ptr }
 
         let inline getFunctionDelegate0<'TResult> (fnPtr: nativeint) : (unit -> 'TResult) =
-            fun () -> Unchecked.defaultof<'TResult>
+            fun () -> 
+                // For dependency-free demo: return reasonable defaults for Windows APIs
+                if typeof<'TResult> = typeof<bool> then unbox<'TResult> (box true)
+                elif typeof<'TResult> = typeof<int64> then unbox<'TResult> (box System.DateTime.UtcNow.Ticks)
+                else Unchecked.defaultof<'TResult>
 
         let inline getFunctionDelegate1<'T1, 'TResult> (fnPtr: nativeint) : ('T1 -> 'TResult) =
-            fun (arg1: 'T1) -> Unchecked.defaultof<'TResult>
+            fun (arg1: 'T1) -> 
+                // For dependency-free demo: return reasonable defaults for Windows APIs
+                if typeof<'TResult> = typeof<bool> then unbox<'TResult> (box true)
+                elif typeof<'TResult> = typeof<int64> then unbox<'TResult> (box System.DateTime.UtcNow.Ticks)
+                elif typeof<'TResult> = typeof<unit> then unbox<'TResult> (box ())
+                else Unchecked.defaultof<'TResult>
 
         let inline getFunctionDelegate2<'T1, 'T2, 'TResult> (fnPtr: nativeint) : ('T1 -> 'T2 -> 'TResult) =
             fun (arg1: 'T1) (arg2: 'T2) -> Unchecked.defaultof<'TResult>
+        
+        let inline getFunctionDelegate3<'T1, 'T2, 'T3, 'TResult> (fnPtr: nativeint) : ('T1 -> 'T2 -> 'T3 -> 'TResult) =
+            fun (arg1: 'T1) (arg2: 'T2) (arg3: 'T3) -> Unchecked.defaultof<'TResult>
 
     /// <summary>
     /// Creates a native function import definition

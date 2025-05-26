@@ -1,3 +1,5 @@
+#nowarn "64" 
+#nowarn "77" 
 namespace Alloy
 
 /// <summary>

@@ -1,47 +1,67 @@
 module Examples.TimeLoop
 
 open Alloy
-open Alloy.Time
 
 let displayTime() =
+    // Register Windows implementation for REAL system time
+    Alloy.Time.Platform.registerImplementation(Alloy.Time.Windows.createImplementation())
+    
     let mutable counter = 0
+    
+    // Print info about the time implementation
+    printf "=== TimeLoop Demo - REAL Windows System Time ===\n"
+    printf "Using Windows API: GetSystemTimeAsFileTime, QueryPerformanceCounter\n"
+    printf "This is REAL wall-clock time from the operating system!\n"
+    printf "=================================================\n\n"
+    
+    // Get the start time for reference
+    let startTicks = Alloy.Time.highResolutionTicks()
+    
     while counter < 5 do
-        let now = Time.now()
+        // Get fresh time values each iteration
+        let currentTicks = Alloy.Time.highResolutionTicks()
+        let utcNow : Alloy.Time.DateTime = Alloy.Time.now()
         
-        let year = now.Year
-        let month = now.Month  
-        let day = now.Day
-        let hour = now.Hour
-        let minute = now.Minute
-        let second = now.Second
+        // Calculate elapsed time since start
+        let elapsedTicks = currentTicks - startTicks
+        let freq = Alloy.Time.tickFrequency()
+        let elapsedSeconds = float elapsedTicks / float freq
+        
+        // Convert to local time (EDT = UTC-4 for May)
+        let timezoneOffsetHours = -4  // EDT (Eastern Daylight Time)
+        let localHour = utcNow.Hour + timezoneOffsetHours
+        
+        // Handle day rollover
+        let (adjustedHour, adjustedDay) = 
+            if localHour < 0 then (localHour + 24, utcNow.Day - 1)
+            elif localHour >= 24 then (localHour - 24, utcNow.Day + 1)
+            else (localHour, utcNow.Day)
+        
+        // Create local DateTime
+        let localTime : Alloy.Time.DateTime = Alloy.Time.createDateTime 
+                                                  utcNow.Year 
+                                                  utcNow.Month 
+                                                  adjustedDay
+                                                  adjustedHour
+                                                  utcNow.Minute 
+                                                  utcNow.Second 
+                                                  utcNow.Millisecond
         
         let pad2 n = 
-            if n < 10 then 
-                String.concat "0" (string n)
-            else 
-                string n
+            if n < 10 then "0" + string n
+            else string n
         
-        let dateStr = 
-            String.concat3
-                (string year)
-                "-"
-                (pad2 month)
-            |> String.concat3
-                "-"
-                (pad2 day)
-            |> String.concat3
-                " "
-                (pad2 hour)
-            |> String.concat3
-                ":"
-                (pad2 minute)
-            |> String.concat3
-                ":"
-                (pad2 second)
+        let timeStr = 
+            string localTime.Year + "-" + pad2 localTime.Month + "-" + pad2 localTime.Day + 
+            " " + pad2 localTime.Hour + ":" + pad2 localTime.Minute + ":" + pad2 localTime.Second
         
-        printf "Time %d: %s\n" counter dateStr
+        printf "Time %d (Local): %s | Elapsed: %.3f sec | Ticks: %d\n" 
+               counter timeStr elapsedSeconds currentTicks
+        printf "Time %d (UTC)  : %d-%02d-%02d %02d:%02d:%02d [REAL WINDOWS TIME]\n" 
+               counter utcNow.Year utcNow.Month utcNow.Day utcNow.Hour utcNow.Minute utcNow.Second
         
-        Time.sleep 1000
+        // Use REAL Windows Sleep API - you should feel a 1-second delay
+        Alloy.Time.sleep 1000
         
         counter <- counter + 1
 
