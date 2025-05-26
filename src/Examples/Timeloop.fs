@@ -57,8 +57,6 @@ let displayTime() =
         
         printf "Time %d (Local): %s | Elapsed: %.3f sec | Ticks: %d\n" 
                counter timeStr elapsedSeconds currentTicks
-        printf "Time %d (UTC)  : %d-%02d-%02d %02d:%02d:%02d [REAL WINDOWS TIME]\n" 
-               counter utcNow.Year utcNow.Month utcNow.Day utcNow.Hour utcNow.Minute utcNow.Second
         
         // Use REAL Windows Sleep API - you should feel a 1-second delay
         Alloy.Time.sleep 1000
