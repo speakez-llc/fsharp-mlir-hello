@@ -72,6 +72,9 @@ module NativeInterop =
         
         [<DllImport("kernel32.dll", SetLastError = true)>]
         extern void Sleep(uint32 dwMilliseconds)
+        
+        [<DllImport("kernel32.dll", SetLastError = true)>]
+        extern uint32 GetTimeZoneInformation(nativeint lpTimeZoneInformation)
 
     /// <summary>
     /// Creates a native function import definition
@@ -127,6 +130,13 @@ module NativeInterop =
                 TemporaryPInvoke.Sleep(ms)
                 unbox<'TResult> (box ())
             | _ -> failwith "Sleep expects uint32 argument"
+            
+        | "kernel32", "GetTimeZoneInformation" ->
+            match box arg1 with
+            | :? nativeint as ptr ->
+                let result = TemporaryPInvoke.GetTimeZoneInformation(ptr)
+                unbox<'TResult> (box result)
+            | _ -> failwith "GetTimeZoneInformation expects nativeint argument"
             
         | libName, funcName ->
             failwith $"Native function {libName}.{funcName} not implemented in proof of concept"

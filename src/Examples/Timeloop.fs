@@ -8,17 +8,15 @@ let displayTime() =
     
     let mutable counter = 0
     
-    // Print info about the time implementation
-    printf "=== TimeLoop Demo - REAL Windows System Time ===\n"
-    printf "Using Windows API: GetSystemTimeAsFileTime, QueryPerformanceCounter\n"
-    printf "This is REAL wall-clock time from the operating system!\n"
-    printf "=================================================\n\n"
+    printf "=== TimeLoop Demo - REAL Local Time ===\n\n"
     
+    // Get the system's current time zone offset
+    let timeZoneOffsetMinutes = Alloy.Time.Windows.getCurrentTimeZoneOffsetMinutes()
+      
     // Get the start time for reference
     let startTicks = Alloy.Time.highResolutionTicks()
     
     while counter < 5 do
-        // Get fresh time values each iteration
         let currentTicks = Alloy.Time.highResolutionTicks()
         let utcNow : Alloy.Time.DateTime = Alloy.Time.now()
         
@@ -27,15 +25,20 @@ let displayTime() =
         let freq = Alloy.Time.tickFrequency()
         let elapsedSeconds = float elapsedTicks / float freq
         
-        // Convert to local time (EDT = UTC-4 for May)
-        let timezoneOffsetHours = -4  // EDT (Eastern Daylight Time)
-        let localHour = utcNow.Hour + timezoneOffsetHours
+        // Convert UTC to local time: subtract the bias (minutes west of UTC)
+        let utcTotalMinutes = utcNow.Hour * 60 + utcNow.Minute
+        let localTotalMinutes = utcTotalMinutes - timeZoneOffsetMinutes
         
         // Handle day rollover
-        let (adjustedHour, adjustedDay) = 
-            if localHour < 0 then (localHour + 24, utcNow.Day - 1)
-            elif localHour >= 24 then (localHour - 24, utcNow.Day + 1)
-            else (localHour, utcNow.Day)
+        let (adjustedHour, adjustedMinute, adjustedDay) = 
+            if localTotalMinutes < 0 then
+                let correctedMinutes = localTotalMinutes + (24 * 60)
+                (correctedMinutes / 60, correctedMinutes % 60, utcNow.Day - 1)
+            elif localTotalMinutes >= 24 * 60 then
+                let correctedMinutes = localTotalMinutes - (24 * 60)
+                (correctedMinutes / 60, correctedMinutes % 60, utcNow.Day + 1)
+            else
+                (localTotalMinutes / 60, localTotalMinutes % 60, utcNow.Day)
         
         // Create local DateTime
         let localTime : Alloy.Time.DateTime = Alloy.Time.createDateTime 
@@ -43,7 +46,7 @@ let displayTime() =
                                                   utcNow.Month 
                                                   adjustedDay
                                                   adjustedHour
-                                                  utcNow.Minute 
+                                                  adjustedMinute
                                                   utcNow.Second 
                                                   utcNow.Millisecond
         
@@ -55,10 +58,10 @@ let displayTime() =
             string localTime.Year + "-" + pad2 localTime.Month + "-" + pad2 localTime.Day + 
             " " + pad2 localTime.Hour + ":" + pad2 localTime.Minute + ":" + pad2 localTime.Second
         
-        printf "Time %d (Local): %s | Elapsed: %.3f sec | Ticks: %d\n" 
-               counter timeStr elapsedSeconds currentTicks
+        printf "Time %d: %s | Elapsed: %.3f sec\n" 
+               counter timeStr elapsedSeconds
         
-        // Use REAL Windows Sleep API - you should feel a 1-second delay
+        // Use REAL Windows Sleep API
         Alloy.Time.sleep 1000
         
         counter <- counter + 1

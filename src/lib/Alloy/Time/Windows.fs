@@ -39,6 +39,44 @@ module Windows =
         val mutable wMilliseconds: uint16
 
     /// <summary>
+    /// Proper Windows TIME_ZONE_INFORMATION structure (172 bytes total)
+    /// </summary>
+    [<Struct>]
+    type TIME_ZONE_INFORMATION =
+        val mutable Bias: int32                    // Minutes west of UTC
+        // StandardName: WCHAR[32] = 64 bytes
+        val mutable StandardName1: int64           // 8 bytes * 8 = 64 bytes
+        val mutable StandardName2: int64
+        val mutable StandardName3: int64
+        val mutable StandardName4: int64
+        val mutable StandardName5: int64
+        val mutable StandardName6: int64
+        val mutable StandardName7: int64
+        val mutable StandardName8: int64
+        val mutable StandardDate: SYSTEMTIME      // 16 bytes
+        val mutable StandardBias: int32            // Additional bias for standard time
+        // DaylightName: WCHAR[32] = 64 bytes
+        val mutable DaylightName1: int64           // 8 bytes * 8 = 64 bytes
+        val mutable DaylightName2: int64
+        val mutable DaylightName3: int64
+        val mutable DaylightName4: int64
+        val mutable DaylightName5: int64
+        val mutable DaylightName6: int64
+        val mutable DaylightName7: int64
+        val mutable DaylightName8: int64
+        val mutable DaylightDate: SYSTEMTIME      // 16 bytes
+        val mutable DaylightBias: int32            // Additional bias for daylight time (usually negative)
+
+    /// <summary>
+    /// Time zone ID constants
+    /// </summary>
+    type TimeZoneId =
+        | Unknown = 0u
+        | Standard = 1u
+        | Daylight = 2u
+        | Invalid = 0xFFFFFFFFu
+
+    /// <summary>
     /// Windows time functions using the enhanced P/Invoke-like API
     /// </summary>
     module Kernel32 =
@@ -86,6 +124,15 @@ module Windows =
                 CharSet = CharSet.Ansi
                 SupressErrorHandling = false
             }
+            
+        let getTimeZoneInformationImport : NativeImport<nativeint -> uint32> = 
+            {
+                LibraryName = "kernel32"
+                FunctionName = "GetTimeZoneInformation"
+                CallingConvention = CallingConvention.Cdecl
+                CharSet = CharSet.Ansi
+                SupressErrorHandling = false
+            }
         
         /// <summary>
         /// Gets the current system time as a FILETIME
@@ -119,6 +166,21 @@ module Windows =
         /// </summary>
         let sleep(milliseconds: uint32) =
             invokeFunc1 sleepImport milliseconds
+            
+        /// <summary>
+        /// Gets the current time zone information
+        /// </summary>
+        let getTimeZoneInformation() =
+            let tzi = NativePtr.stackalloc<TIME_ZONE_INFORMATION> 1
+            let result = invokeFunc1 getTimeZoneInformationImport (NativePtr.toNativeInt tzi)
+            let timeZoneInfo = NativePtr.read tzi
+            // Convert uint32 result to TimeZoneId enum, handle the conversion properly
+            let timeZoneId = 
+                if result = 0u then TimeZoneId.Unknown
+                elif result = 1u then TimeZoneId.Standard  
+                elif result = 2u then TimeZoneId.Daylight
+                else TimeZoneId.Invalid
+            (timeZoneId, timeZoneInfo)
 
     /// <summary>
     /// Helper functions to convert between time formats
@@ -137,6 +199,21 @@ module Windows =
         /// </summary>
         let ticksToFileTime (ticks: int64) =
             subtract ticks windowsToNetTicksOffset
+            
+        /// <summary>
+        /// Gets the current time zone offset in minutes from UTC
+        /// Simple approach: get base bias, adjust for daylight time if needed
+        /// </summary>
+        let getCurrentTimeZoneOffsetMinutes() : int =
+            let (timeZoneId, tzi) = Kernel32.getTimeZoneInformation()
+            
+            match timeZoneId with
+            | TimeZoneId.Daylight ->
+                // In daylight time: subtract 1 hour (60 minutes) from base bias
+                tzi.Bias - 60
+            | _ ->
+                // Standard time or unknown: use base bias
+                tzi.Bias
 
     /// <summary>
     /// Windows platform implementation of IPlatformTime
@@ -186,3 +263,10 @@ module Windows =
     /// </summary>
     let createImplementation() =
         WindowsTimeImplementation() :> IPlatformTime
+        
+    /// <summary>
+    /// Gets the current local time zone offset from UTC in minutes
+    /// Returns positive values for west of UTC, negative for east of UTC
+    /// </summary>
+    let getCurrentTimeZoneOffsetMinutes() : int =
+        TimeConversion.getCurrentTimeZoneOffsetMinutes()
