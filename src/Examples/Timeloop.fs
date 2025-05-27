@@ -10,8 +10,8 @@ let displayTime() =
     
     printf "=== TimeLoop Demo - REAL Local Time ===\n\n"
     
-    // Get the system's current time zone offset
-    let timeZoneOffsetMinutes = Alloy.Time.Windows.getCurrentTimeZoneOffsetMinutes()
+    // Get the system's current time zone offset (platform-agnostic)
+    let timeZoneOffsetMinutes = Alloy.Time.getCurrentTimezoneOffsetMinutes()
       
     // Get the start time for reference
     let startTicks = Alloy.Time.highResolutionTicks()

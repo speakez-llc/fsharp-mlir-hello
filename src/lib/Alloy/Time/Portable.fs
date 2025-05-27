@@ -60,6 +60,13 @@ module Portable =
                 // Simulate sleep by advancing the tick counter
                 let ticksToAdd = multiply (int64 milliseconds) (ticksPerSecond / 1000L)
                 tickCounter <- add tickCounter ticksToAdd
+                
+            /// <summary>
+            /// Gets the current timezone offset from UTC in minutes
+            /// Portable implementation assumes UTC
+            /// </summary>
+            member _.GetTimezoneOffsetMinutes() =
+                0 // Portable fallback: assume UTC
 
     /// <summary>
     /// Factory function to create a portable time implementation

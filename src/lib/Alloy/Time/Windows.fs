@@ -257,6 +257,12 @@ module Windows =
             /// </summary>
             member _.Sleep(milliseconds) =
                 Kernel32.sleep(uint32 milliseconds)
+                
+            /// <summary>
+            /// Gets the current timezone offset from UTC in minutes
+            /// </summary>
+            member _.GetTimezoneOffsetMinutes() =
+                TimeConversion.getCurrentTimeZoneOffsetMinutes()
 
     /// <summary>
     /// Factory function to create a Windows time implementation

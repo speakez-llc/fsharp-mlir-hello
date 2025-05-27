@@ -60,7 +60,7 @@ module NativeInterop =
     module private TemporaryPInvoke =
         open System.Runtime.InteropServices
         
-        // Windows API declarations
+        // Windows API declarations (always available for now)
         [<DllImport("kernel32.dll", SetLastError = true)>]
         extern void GetSystemTimeAsFileTime(nativeint lpSystemTimeAsFileTime)
         
@@ -92,9 +92,14 @@ module NativeInterop =
     /// Invokes a native function with no arguments
     /// </summary>
     let invokeFunc0<'TResult> (import: NativeImport<unit -> 'TResult>) : 'TResult =
-        // For proof of concept, we'll use direct mapping to known functions
-        // In final implementation, this will use MLIR/LLVM generated function calls
-        failwith $"invokeFunc0 not implemented for {import.FunctionName}"
+        // Platform-agnostic dispatch based on function name
+        match import.LibraryName, import.FunctionName with
+        | "libSystem", "mach_absolute_time" ->
+            // macOS function - not available on Windows in this proof of concept
+            failwith "mach_absolute_time not available on Windows - use platform-specific build"
+            
+        | libName, funcName ->
+            failwith $"invokeFunc0 not implemented for {libName}.{funcName}"
 
     /// <summary>
     /// Invokes a native function with one argument
@@ -138,6 +143,13 @@ module NativeInterop =
                 unbox<'TResult> (box result)
             | _ -> failwith "GetTimeZoneInformation expects nativeint argument"
             
+        | "libSystem", "mach_timebase_info" ->
+            match box arg1 with
+            | :? nativeint as info ->
+                // macOS function - not available on Windows in this proof of concept
+                failwith "mach_timebase_info not available on Windows - use platform-specific build"
+            | _ -> failwith "mach_timebase_info expects nativeint argument"
+            
         | libName, funcName ->
             failwith $"Native function {libName}.{funcName} not implemented in proof of concept"
 
@@ -146,7 +158,38 @@ module NativeInterop =
     /// </summary>
     let invokeFunc2<'T1, 'T2, 'TResult> 
         (import: NativeImport<'T1 -> 'T2 -> 'TResult>) (arg1: 'T1) (arg2: 'T2) : 'TResult =
-        failwith $"invokeFunc2 not implemented for {import.FunctionName}"
+        // Platform-agnostic dispatch based on function name
+        match import.LibraryName, import.FunctionName with
+        | "libc", "clock_gettime" ->
+            // Linux function - not available on Windows in this proof of concept
+            failwith "clock_gettime not available on Windows - use platform-specific build"
+            
+        | "libc", "nanosleep" ->
+            // Linux function - not available on Windows in this proof of concept
+            failwith "nanosleep not available on Windows - use platform-specific build"
+            
+        | "libc", "localtime_r" ->
+            // Linux function - not available on Windows in this proof of concept
+            failwith "localtime_r not available on Windows - use platform-specific build"
+            
+        | "libSystem", "clock_gettime" ->
+            // macOS function - not available on Windows in this proof of concept
+            failwith "macOS clock_gettime not available on Windows - use platform-specific build"
+            
+        | "libSystem", "gettimeofday" ->
+            // macOS function - not available on Windows in this proof of concept
+            failwith "gettimeofday not available on Windows - use platform-specific build"
+            
+        | "libSystem", "nanosleep" ->
+            // macOS function - not available on Windows in this proof of concept
+            failwith "macOS nanosleep not available on Windows - use platform-specific build"
+            
+        | "libSystem", "localtime_r" ->
+            // macOS function - not available on Windows in this proof of concept
+            failwith "macOS localtime_r not available on Windows - use platform-specific build"
+            
+        | libName, funcName ->
+            failwith $"invokeFunc2 not implemented for {libName}.{funcName}"
         
     /// <summary>
     /// Invokes a native function with three arguments

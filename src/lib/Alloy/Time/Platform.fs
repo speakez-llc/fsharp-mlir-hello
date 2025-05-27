@@ -37,6 +37,12 @@ module Platform =
         /// Sleeps for the specified number of milliseconds
         /// </summary>
         abstract member Sleep: milliseconds:int -> unit
+        
+        /// <summary>
+        /// Gets the current timezone offset from UTC in minutes
+        /// Returns positive values for west of UTC, negative for east of UTC
+        /// </summary>
+        abstract member GetTimezoneOffsetMinutes: unit -> int
 
     /// <summary>
     /// Exception thrown when platform implementation cannot be determined
@@ -78,6 +84,10 @@ module Platform =
                 // Simulate sleep by advancing the tick counter
                 let ticksToAdd = int64 milliseconds * (ticksPerSecond / 1000L)
                 tickCounter <- tickCounter + ticksToAdd
+                
+            member _.GetTimezoneOffsetMinutes() =
+                // Portable fallback: assume UTC
+                0
 
     /// <summary>
     /// Registry for platform implementations

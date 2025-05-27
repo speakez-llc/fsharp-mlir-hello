@@ -124,6 +124,14 @@ module Time =
         platformTime.GetTickFrequency()
         
     /// <summary>
+    /// Gets the current timezone offset from UTC in minutes
+    /// Returns positive values for west of UTC, negative for east of UTC
+    /// </summary>
+    /// <returns>The timezone offset in minutes</returns>
+    let getCurrentTimezoneOffsetMinutes (): int =
+        platformTime.GetTimezoneOffsetMinutes()
+        
+    /// <summary>
     /// Calculates elapsed time between two high-resolution tick values
     /// </summary>
     /// <param name="startTicks">The starting tick count</param>

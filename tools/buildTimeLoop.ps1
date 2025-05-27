@@ -1,8 +1,15 @@
-# Build script for TimeLoop example
+# Build script for TimeLoop example - Platform-Aware Version
 
 # Define paths
 $projectRoot = "D:\repos\fsharp-mlir-hello"
 $buildDir = "$projectRoot\build"
+
+# Detect platform (use different variable names to avoid conflicts)
+$onWindows = $IsWindows -or ($env:OS -eq "Windows_NT")
+$onLinux = $IsLinux -or ($env:USER -ne $null -and $env:WINDIR -eq $null)
+$onMacOS = $IsMacOS
+
+Write-Host "Detected platform: Windows=$onWindows, Linux=$onLinux, macOS=$onMacOS"
 
 # Path to F# compiler - this should be the Visual Studio F# compiler
 # This is the typical location for the F# compiler with Visual Studio
@@ -79,8 +86,25 @@ Invoke-FSC --out:$buildDir\AlloyTimeNativeInterop.dll --target:library --referen
 # Compile Platform interface first (defines IPlatformTime)
 Invoke-FSC --out:$buildDir\AlloyTimePlatform.dll --target:library --reference:$buildDir\Alloy.dll $projectRoot\src\lib\Alloy\Time\Platform.fs
 
-# Compile all time implementations (can now reference IPlatformTime)
-Invoke-FSC --out:$buildDir\AlloyTimeImplementations.dll --target:library --reference:$buildDir\Alloy.dll --reference:$buildDir\AlloyTimePlatform.dll --reference:$buildDir\AlloyTimeNativeInterop.dll $projectRoot\src\lib\Alloy\Time\Portable.fs $projectRoot\src\lib\Alloy\Time\Windows.fs $projectRoot\src\lib\Alloy\Time\Linux.fs
+# Compile platform-specific implementations based on detected platform
+Write-Host "Compiling platform-specific time implementations..."
+
+if ($onWindows) {
+    Write-Host "Building for Windows platform..."
+    Invoke-FSC --out:$buildDir\AlloyTimeImplementations.dll --target:library --reference:$buildDir\Alloy.dll --reference:$buildDir\AlloyTimePlatform.dll --reference:$buildDir\AlloyTimeNativeInterop.dll $projectRoot\src\lib\Alloy\Time\Windows.fs
+} 
+elseif ($onLinux) {
+    Write-Host "Building for Linux platform..."
+    Invoke-FSC --out:$buildDir\AlloyTimeImplementations.dll --target:library --reference:$buildDir\Alloy.dll --reference:$buildDir\AlloyTimePlatform.dll --reference:$buildDir\AlloyTimeNativeInterop.dll $projectRoot\src\lib\Alloy\Time\Linux.fs
+} 
+elseif ($onMacOS) {
+    Write-Host "Building for macOS platform..."
+    Invoke-FSC --out:$buildDir\AlloyTimeImplementations.dll --target:library --reference:$buildDir\Alloy.dll --reference:$buildDir\AlloyTimePlatform.dll --reference:$buildDir\AlloyTimeNativeInterop.dll $projectRoot\src\lib\Alloy\Time\MacOS.fs
+} 
+else {
+    Write-Host "Unknown platform, falling back to Portable implementation..."
+    Invoke-FSC --out:$buildDir\AlloyTimeImplementations.dll --target:library --reference:$buildDir\Alloy.dll --reference:$buildDir\AlloyTimePlatform.dll --reference:$buildDir\AlloyTimeNativeInterop.dll $projectRoot\src\lib\Alloy\Time\Portable.fs
+}
 
 # Compile the main Time module
 Invoke-FSC --out:$buildDir\AlloyTime.dll --target:library --reference:$buildDir\Alloy.dll --reference:$buildDir\AlloyTimePlatform.dll --reference:$buildDir\AlloyTimeNativeInterop.dll --reference:$buildDir\AlloyTimeImplementations.dll $projectRoot\src\lib\Alloy\Time.fs

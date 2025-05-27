@@ -26,6 +26,23 @@ module Linux =
             add (multiply this.tv_sec 10000000L) (divide this.tv_nsec 100L)
 
     /// <summary>
+    /// Unix tm structure for timezone calculations
+    /// </summary>
+    [<Struct>]
+    type TmStruct =
+        val mutable tm_sec: int32     // seconds (0-60)
+        val mutable tm_min: int32     // minutes (0-59)
+        val mutable tm_hour: int32    // hours (0-23)
+        val mutable tm_mday: int32    // day of month (1-31)
+        val mutable tm_mon: int32     // month (0-11)
+        val mutable tm_year: int32    // year - 1900
+        val mutable tm_wday: int32    // day of week (0-6, Sunday = 0)
+        val mutable tm_yday: int32    // day in year (0-365)
+        val mutable tm_isdst: int32   // daylight saving time
+        val mutable tm_gmtoff: int64  // seconds east of UTC
+        val mutable tm_zone: nativeint // timezone abbreviation
+
+    /// <summary>
     /// Unix clock IDs
     /// </summary>
     type ClockID =
@@ -35,23 +52,35 @@ module Linux =
         | CLOCK_THREAD_CPUTIME_ID = 3
 
     /// <summary>
-    /// Unix time functions using enhanced P/Invoke-like API
+    /// Linux time functions using enhanced P/Invoke-like API
     /// </summary>
     module LibC =
-        let inline importFunc2<'T1, 'T2, 'TResult> libraryName functionName =
+        let clockGettimeImport : NativeImport<int -> nativeint -> int> = 
             {
-                LibraryName = libraryName
-                FunctionName = functionName
+                LibraryName = "libc"
+                FunctionName = "clock_gettime"
                 CallingConvention = CallingConvention.Cdecl
                 CharSet = CharSet.Ansi
                 SupressErrorHandling = false
-            } : NativeImport<'T1 -> 'T2 -> 'TResult>
-        
-        let clockGettimeImport = 
-            importFunc2<int, nativeint, int> "libc" "clock_gettime"
+            }
             
-        let nanosleepImport = 
-            importFunc2<nativeint, nativeint, int> "libc" "nanosleep"
+        let nanosleepImport : NativeImport<nativeint -> nativeint -> int> = 
+            {
+                LibraryName = "libc"
+                FunctionName = "nanosleep"
+                CallingConvention = CallingConvention.Cdecl
+                CharSet = CharSet.Ansi
+                SupressErrorHandling = false
+            }
+            
+        let localtimeRImport : NativeImport<nativeint -> nativeint -> nativeint> = 
+            {
+                LibraryName = "libc"
+                FunctionName = "localtime_r"
+                CallingConvention = CallingConvention.Cdecl
+                CharSet = CharSet.Ansi
+                SupressErrorHandling = false
+            }
         
         /// <summary>
         /// Gets the current time from the specified clock
@@ -88,6 +117,29 @@ module Linux =
                             
             if lessThan result 0 then
                 failwith "nanosleep failed"
+                
+        /// <summary>
+        /// Gets timezone information using localtime_r
+        /// </summary>
+        let getTimezoneOffset() =
+            // Get current time
+            let currentTime = clockGettime(ClockID.CLOCK_REALTIME)
+            let unixTime = divide currentTime 10000000L // Convert ticks to seconds
+            
+            let timePtr = NativePtr.stackalloc<int64> 1
+            NativePtr.set timePtr 0 unixTime
+            
+            let tmPtr = NativePtr.stackalloc<TmStruct> 1
+            
+            let result = invokeFunc2 localtimeRImport (NativePtr.toNativeInt timePtr) (NativePtr.toNativeInt tmPtr)
+            
+            if result <> nativeint 0 then
+                let tm = NativePtr.read tmPtr
+                // tm_gmtoff is seconds east of UTC, convert to minutes west of UTC
+                int (-tm.tm_gmtoff / 60L)
+            else
+                // Fallback: assume UTC
+                0
 
     /// <summary>
     /// Helper constants for time conversion
@@ -143,7 +195,7 @@ module Linux =
             /// Gets the frequency of the high-resolution performance counter
             /// </summary>
             member _.GetTickFrequency() =
-                10000000L
+                1000000000L // nanosecond precision
             
             /// <summary>
             /// Sleeps for the specified number of milliseconds
@@ -152,6 +204,15 @@ module Linux =
                 let seconds = int64 (divide milliseconds 1000)
                 let nanoseconds = int64 (multiply (modulo milliseconds 1000) 1000000)
                 LibC.nanosleep(seconds, nanoseconds)
+                
+            /// <summary>
+            /// Gets the current timezone offset from UTC in minutes
+            /// </summary>
+            member _.GetTimezoneOffsetMinutes() =
+                try
+                    LibC.getTimezoneOffset()
+                with
+                | _ -> 0 // Fallback to UTC if timezone detection fails
 
     /// <summary>
     /// Factory function to create a Linux time implementation

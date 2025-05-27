@@ -1,10 +1,10 @@
 #nowarn "9"
 
-namespace Alloy.Memory
+namespace Alloy.Time
 
 open FSharp.NativeInterop
 open Alloy.Time.NativeInterop
-open Alloy.Memory.Platform
+open Alloy.Memory
 
 /// <summary>
 /// macOS platform-specific memory implementation
@@ -68,7 +68,7 @@ module MacOS =
             /// Copies memory from a native pointer to a byte array
             /// </summary>
             member _.CopyFromNative(source: nativeint, destination: byte[], offset: int, length: int) =
-                use destPin = fixed &destination[offset]
+                use destPin = fixed &destination.[offset]
                 let destPtr = NativePtr.toNativeInt destPin
                 LibSystem.memcpy destPtr source (uint64 length)
             
@@ -76,7 +76,7 @@ module MacOS =
             /// Copies memory from a byte array to a native pointer
             /// </summary>
             member _.CopyToNative(source: byte[], offset: int, destination: nativeint, length: int) =
-                use srcPin = fixed &source[offset]
+                use srcPin = fixed &source.[offset]
                 let srcPtr = NativePtr.toNativeInt srcPin
                 LibSystem.memcpy destination srcPtr (uint64 length)
             
