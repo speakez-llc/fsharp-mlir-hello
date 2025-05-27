@@ -8,7 +8,6 @@ open Alloy
 /// <summary>
 /// Native interoperability layer for Alloy, providing P/Invoke-like functionality 
 /// without System.Runtime.InteropServices dependencies in final compilation
-/// (uses System.Runtime.InteropServices temporarily for proof of concept)
 /// </summary>
 module NativeInterop =
     /// <summary>

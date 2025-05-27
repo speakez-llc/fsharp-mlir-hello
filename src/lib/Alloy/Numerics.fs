@@ -2,10 +2,340 @@
 #nowarn "77" 
 namespace Alloy
 
+open FSharp.NativeInterop
+
+/// <summary>
+/// Pure native math implementations with zero dependencies
+/// All functions work directly with binary representations and bit manipulation
+/// </summary>
+[<RequireQualifiedAccess>]
+module NativeMath =
+    
+    // ===================================
+    // Constants and helper functions
+    // ===================================
+    
+    /// <summary>
+    /// IEEE 754 double precision constants
+    /// </summary>
+    module DoubleConstants =
+        let [<Literal>] SIGN_MASK = 0x8000000000000000UL
+        let [<Literal>] EXPONENT_MASK = 0x7FF0000000000000UL
+        let [<Literal>] MANTISSA_MASK = 0x000FFFFFFFFFFFFFUL
+        let [<Literal>] EXPONENT_BIAS = 1023
+        let [<Literal>] MANTISSA_BITS = 52
+        let [<Literal>] EXPONENT_SHIFT = 52
+    
+    /// <summary>
+    /// IEEE 754 single precision constants  
+    /// </summary>
+    module FloatConstants =
+        let [<Literal>] SIGN_MASK = 0x80000000u
+        let [<Literal>] EXPONENT_MASK = 0x7F800000u
+        let [<Literal>] MANTISSA_MASK = 0x007FFFFFu
+        let [<Literal>] EXPONENT_BIAS = 127
+        let [<Literal>] MANTISSA_BITS = 23
+        let [<Literal>] EXPONENT_SHIFT = 23
+    
+    /// <summary>
+    /// Convert double to its bit representation using F# NativePtr
+    /// </summary>
+    let inline doubleToBits (value: float) : uint64 =
+        let mutable v = value
+        let ptr = &&v |> NativePtr.toNativeInt |> NativePtr.ofNativeInt<uint64>
+        NativePtr.read ptr
+    
+    /// <summary>
+    /// Convert bit representation to double using F# NativePtr
+    /// </summary>
+    let inline bitsToDouble (bits: uint64) : float =
+        let mutable v = bits
+        let ptr = &&v |> NativePtr.toNativeInt |> NativePtr.ofNativeInt<float>
+        NativePtr.read ptr
+    
+    /// <summary>
+    /// Convert float to its bit representation using F# NativePtr
+    /// </summary>
+    let inline floatToBits (value: float32) : uint32 =
+        let mutable v = value
+        let ptr = &&v |> NativePtr.toNativeInt |> NativePtr.ofNativeInt<uint32>
+        NativePtr.read ptr
+    
+    /// <summary>
+    /// Convert bit representation to float using F# NativePtr
+    /// </summary>
+    let inline bitsToFloat (bits: uint32) : float32 =
+        let mutable v = bits
+        let ptr = &&v |> NativePtr.toNativeInt |> NativePtr.ofNativeInt<float32>
+        NativePtr.read ptr
+    
+    // ===================================
+    // Power functions - dependency-free
+    // ===================================
+    
+    /// <summary>
+    /// Fast integer power using exponentiation by squaring
+    /// </summary>
+    let rec intPower (base': int) (exp: int) : int =
+        if exp = 0 then 1
+        elif exp = 1 then base'
+        elif exp % 2 = 0 then
+            let half = intPower base' (exp / 2)
+            half * half
+        else
+            base' * intPower base' (exp - 1)
+    
+    /// <summary>
+    /// Fast 64-bit integer power
+    /// </summary>
+    let rec int64Power (base': int64) (exp: int) : int64 =
+        if exp = 0 then 1L
+        elif exp = 1 then base'
+        elif exp % 2 = 0 then
+            let half = int64Power base' (exp / 2)
+            half * half
+        else
+            base' * int64Power base' (exp - 1)
+    
+    /// <summary>
+    /// Decimal power (integer exponent only)
+    /// </summary>
+    let rec decimalPower (base': decimal) (exp: int) : decimal =
+        if exp = 0 then 1M
+        elif exp = 1 then base'
+        elif exp > 0 then
+            if exp % 2 = 0 then
+                let half = decimalPower base' (exp / 2)
+                half * half
+            else
+                base' * decimalPower base' (exp - 1)
+        else
+            // Negative exponent: 1 / (base^(-exp))
+            1M / decimalPower base' (-exp)
+    
+    /// <summary>
+    /// Fast floating point power for integer exponents
+    /// For fractional exponents, use Taylor series or other approximations
+    /// </summary>
+    let floatIntPower (base': float) (exp: int) : float =
+        if exp = 0 then 1.0
+        elif exp = 1 then base'
+        elif exp > 0 then
+            let rec loop acc b e =
+                if e = 0 then acc
+                elif e % 2 = 0 then loop acc (b * b) (e / 2)
+                else loop (acc * b) b (e - 1)
+            loop 1.0 base' exp
+        else
+            // Negative exponent
+            1.0 / floatIntPower base' (-exp)
+    
+    // ===================================
+    // Ceiling/Floor/Round - bit manipulation
+    // ===================================
+    
+    /// <summary>
+    /// Fast ceiling function using bit manipulation
+    /// </summary>
+    let ceiling (value: float) : float =
+        if value <> value then value // NaN
+        else
+            let bits = doubleToBits value
+            let exponent = int ((bits &&& DoubleConstants.EXPONENT_MASK) >>> DoubleConstants.EXPONENT_SHIFT) - DoubleConstants.EXPONENT_BIAS
+            
+            if exponent >= DoubleConstants.MANTISSA_BITS then
+                // Already an integer or too large
+                value
+            elif exponent < 0 then
+                // Absolute value < 1
+                if bits &&& DoubleConstants.SIGN_MASK = 0UL then 1.0 else 0.0
+            else
+                // Extract integer part
+                let mantissaShift = DoubleConstants.MANTISSA_BITS - exponent
+                let integerMask = ~~~((1UL <<< mantissaShift) - 1UL)
+                let integerPart = bits &&& integerMask
+                
+                if integerPart = bits then
+                    // Already an integer
+                    value
+                else
+                    // Has fractional part
+                    let result = bitsToDouble integerPart
+                    if bits &&& DoubleConstants.SIGN_MASK = 0UL then
+                        result + 1.0  // Positive: round up
+                    else
+                        result        // Negative: round toward zero
+    
+    /// <summary>
+    /// Fast floor function using bit manipulation
+    /// </summary>
+    let floor (value: float) : float =
+        if value <> value then value // NaN
+        else
+            let bits = doubleToBits value
+            let exponent = int ((bits &&& DoubleConstants.EXPONENT_MASK) >>> DoubleConstants.EXPONENT_SHIFT) - DoubleConstants.EXPONENT_BIAS
+            
+            if exponent >= DoubleConstants.MANTISSA_BITS then
+                // Already an integer or too large
+                value
+            elif exponent < 0 then
+                // Absolute value < 1
+                if bits &&& DoubleConstants.SIGN_MASK = 0UL then 0.0 else -1.0
+            else
+                // Extract integer part
+                let mantissaShift = DoubleConstants.MANTISSA_BITS - exponent
+                let integerMask = ~~~((1UL <<< mantissaShift) - 1UL)
+                let integerPart = bits &&& integerMask
+                
+                if integerPart = bits then
+                    // Already an integer
+                    value
+                else
+                    // Has fractional part
+                    let result = bitsToDouble integerPart
+                    if bits &&& DoubleConstants.SIGN_MASK = 0UL then
+                        result        // Positive: round toward zero
+                    else
+                        result - 1.0  // Negative: round down
+    
+    /// <summary>
+    /// Fast round function (banker's rounding)
+    /// </summary>
+    let round (value: float) : float =
+        let f = floor value
+        let diff = value - f
+        
+        if diff < 0.5 then
+            f
+        elif diff > 0.5 then
+            f + 1.0
+        else
+            // Exactly 0.5 - use banker's rounding (round to even)
+            if (int64 f) % 2L = 0L then f else f + 1.0
+    
+    // ===================================
+    // Single precision versions
+    // ===================================
+    
+    /// <summary>
+    /// Single precision ceiling
+    /// </summary>
+    let ceilingf (value: float32) : float32 =
+        if value <> value then value // NaN
+        else
+            let bits = floatToBits value
+            let exponent = int ((bits &&& FloatConstants.EXPONENT_MASK) >>> FloatConstants.EXPONENT_SHIFT) - FloatConstants.EXPONENT_BIAS
+            
+            if exponent >= FloatConstants.MANTISSA_BITS then
+                value
+            elif exponent < 0 then
+                if bits &&& FloatConstants.SIGN_MASK = 0u then 1.0f else 0.0f
+            else
+                let mantissaShift = FloatConstants.MANTISSA_BITS - exponent
+                let integerMask = ~~~((1u <<< mantissaShift) - 1u)
+                let integerPart = bits &&& integerMask
+                
+                if integerPart = bits then
+                    value
+                else
+                    let result = bitsToFloat integerPart
+                    if bits &&& FloatConstants.SIGN_MASK = 0u then
+                        result + 1.0f
+                    else
+                        result
+    
+    /// <summary>
+    /// Single precision floor
+    /// </summary>
+    let floorf (value: float32) : float32 =
+        if value <> value then value // NaN
+        else
+            let bits = floatToBits value
+            let exponent = int ((bits &&& FloatConstants.EXPONENT_MASK) >>> FloatConstants.EXPONENT_SHIFT) - FloatConstants.EXPONENT_BIAS
+            
+            if exponent >= FloatConstants.MANTISSA_BITS then
+                value
+            elif exponent < 0 then
+                if bits &&& FloatConstants.SIGN_MASK = 0u then 0.0f else -1.0f
+            else
+                let mantissaShift = FloatConstants.MANTISSA_BITS - exponent
+                let integerMask = ~~~((1u <<< mantissaShift) - 1u)
+                let integerPart = bits &&& integerMask
+                
+                if integerPart = bits then
+                    value
+                else
+                    let result = bitsToFloat integerPart
+                    if bits &&& FloatConstants.SIGN_MASK = 0u then
+                        result
+                    else
+                        result - 1.0f
+    
+    /// <summary>
+    /// Single precision round
+    /// </summary>
+    let roundf (value: float32) : float32 =
+        let f = floorf value
+        let diff = value - f
+        
+        if diff < 0.5f then
+            f
+        elif diff > 0.5f then
+            f + 1.0f
+        else
+            // Banker's rounding
+            if (int f) % 2 = 0 then f else f + 1.0f
+    
+    // ===================================
+    // Decimal versions (simpler - no bit manipulation needed)
+    // ===================================
+    
+    /// <summary>
+    /// Decimal ceiling
+    /// </summary>
+    let ceilingDecimal (value: decimal) : decimal =
+        let truncated = decimal (int64 value)
+        if value = truncated then
+            value
+        elif value > 0M then
+            truncated + 1M
+        else
+            truncated
+    
+    /// <summary>
+    /// Decimal floor  
+    /// </summary>
+    let floorDecimal (value: decimal) : decimal =
+        let truncated = decimal (int64 value)
+        if value = truncated then
+            value
+        elif value > 0M then
+            truncated
+        else
+            truncated - 1M
+    
+    /// <summary>
+    /// Decimal round
+    /// </summary>
+    let roundDecimal (value: decimal) : decimal =
+        let truncated = decimal (int64 value)
+        let fractional = value - truncated
+        
+        if fractional = 0M then
+            value
+        elif fractional > 0.5M || fractional < -0.5M then
+            if value > 0M then truncated + 1M else truncated - 1M
+        elif fractional = 0.5M || fractional = -0.5M then
+            // Banker's rounding
+            if (int64 truncated) % 2L = 0L then truncated 
+            else if value > 0M then truncated + 1M else truncated - 1M
+        else
+            truncated
+
 /// <summary>
 /// Provides zero-cost numeric operations through statically resolved type parameters.
 /// All functions are exposed through the AutoOpen attribute, making them accessible
-/// when opening the Alloy namespace.
+/// when opening the Alloy namespace. NOW COMPLETELY DEPENDENCY-FREE.
 /// </summary>
 [<AutoOpen>]
 module Numerics =
@@ -88,34 +418,12 @@ module Numerics =
         static member inline Modulo(a: int16, b: int16) = a % b
         static member inline Modulo(a: uint16, b: uint16) = a % b
 
-        // Power implementations
-        static member inline Power(a: int, b: int) = 
-            let mutable result = 1
-            let mutable base' = a
-            let mutable exp = b
-            while exp > 0 do
-                if exp % 2 = 1 then result <- result * base'
-                base' <- base' * base'
-                exp <- exp / 2
-            result
-        static member inline Power(a: float, b: float) = System.Math.Pow(a, b)
-        static member inline Power(a: float32, b: float32) = float32(System.Math.Pow(float a, float b))
-        static member inline Power(a: int64, b: int) = 
-            let mutable result = 1L
-            let mutable base' = a
-            let mutable exp = b
-            while exp > 0 do
-                if exp % 2 = 1 then result <- result * base'
-                base' <- base' * base'
-                exp <- exp / 2
-            result
-        static member inline Power(a: decimal, b: int) = 
-            let mutable result = 1M
-            let mutable exp = b
-            while exp > 0 do
-                result <- result * a
-                exp <- exp - 1
-            result
+        // Power implementations - NOW DEPENDENCY FREE
+        static member inline Power(a: int, b: int) = NativeMath.intPower a b
+        static member inline Power(a: float, b: float) = NativeMath.floatIntPower a (int b) // For now, only integer exponents
+        static member inline Power(a: float32, b: float32) = float32 (NativeMath.floatIntPower (float a) (int b))
+        static member inline Power(a: int64, b: int) = NativeMath.int64Power a b
+        static member inline Power(a: decimal, b: int) = NativeMath.decimalPower a b
 
         // Absolute value implementations
         static member inline Abs(a: int) = abs a
@@ -133,18 +441,18 @@ module Numerics =
         static member inline Sign(a: decimal) = sign a
         static member inline Sign(a: int16) = sign a
 
-        // Rounding implementations
-        static member inline Ceiling(a: float) = System.Math.Ceiling(a)
-        static member inline Ceiling(a: decimal) = System.Math.Ceiling(a)
-        static member inline Ceiling(a: float32) = float32(System.Math.Ceiling(float a))
+        // Rounding implementations - NOW DEPENDENCY FREE
+        static member inline Ceiling(a: float) = NativeMath.ceiling a
+        static member inline Ceiling(a: decimal) = NativeMath.ceilingDecimal a
+        static member inline Ceiling(a: float32) = NativeMath.ceilingf a
 
-        static member inline Floor(a: float) = System.Math.Floor(a)
-        static member inline Floor(a: decimal) = System.Math.Floor(a)
-        static member inline Floor(a: float32) = float32(System.Math.Floor(float a))
+        static member inline Floor(a: float) = NativeMath.floor a
+        static member inline Floor(a: decimal) = NativeMath.floorDecimal a
+        static member inline Floor(a: float32) = NativeMath.floorf a
 
-        static member inline Round(a: float) = System.Math.Round(a)
-        static member inline Round(a: decimal) = System.Math.Round(a)
-        static member inline Round(a: float32) = float32(System.Math.Round(float a))
+        static member inline Round(a: float) = NativeMath.round a
+        static member inline Round(a: decimal) = NativeMath.roundDecimal a
+        static member inline Round(a: float32) = NativeMath.roundf a
     
     /// <summary>
     /// Provides operations for unit-of-measure types with same measure
@@ -229,18 +537,18 @@ module Numerics =
         static member inline SignFloat32(a: float32<'u>) = sign a
         static member inline SignDecimal(a: decimal<'u>) = sign a
 
-        // Rounding implementations for unit-of-measure types
-        static member inline CeilingFloat(a: float<'u>) = LanguagePrimitives.FloatWithMeasure<'u>(System.Math.Ceiling(float a))
-        static member inline CeilingDecimal(a: decimal<'u>) = LanguagePrimitives.DecimalWithMeasure<'u>(System.Math.Ceiling(decimal a))
-        static member inline CeilingFloat32(a: float32<'u>) = LanguagePrimitives.Float32WithMeasure<'u>(float32(System.Math.Ceiling(float a)))
+        // Rounding implementations for unit-of-measure types - NOW DEPENDENCY FREE
+        static member inline CeilingFloat(a: float<'u>) = LanguagePrimitives.FloatWithMeasure<'u>(NativeMath.ceiling (float a))
+        static member inline CeilingDecimal(a: decimal<'u>) = LanguagePrimitives.DecimalWithMeasure<'u>(NativeMath.ceilingDecimal (decimal a))
+        static member inline CeilingFloat32(a: float32<'u>) = LanguagePrimitives.Float32WithMeasure<'u>(NativeMath.ceilingf (float32 a))
 
-        static member inline FloorFloat(a: float<'u>) = LanguagePrimitives.FloatWithMeasure<'u>(System.Math.Floor(float a))
-        static member inline FloorDecimal(a: decimal<'u>) = LanguagePrimitives.DecimalWithMeasure<'u>(System.Math.Floor(decimal a))
-        static member inline FloorFloat32(a: float32<'u>) = LanguagePrimitives.Float32WithMeasure<'u>(float32(System.Math.Floor(float a)))
+        static member inline FloorFloat(a: float<'u>) = LanguagePrimitives.FloatWithMeasure<'u>(NativeMath.floor (float a))
+        static member inline FloorDecimal(a: decimal<'u>) = LanguagePrimitives.DecimalWithMeasure<'u>(NativeMath.floorDecimal (decimal a))
+        static member inline FloorFloat32(a: float32<'u>) = LanguagePrimitives.Float32WithMeasure<'u>(NativeMath.floorf (float32 a))
 
-        static member inline RoundFloat(a: float<'u>) = LanguagePrimitives.FloatWithMeasure<'u>(System.Math.Round(float a))
-        static member inline RoundDecimal(a: decimal<'u>) = LanguagePrimitives.DecimalWithMeasure<'u>(System.Math.Round(decimal a))
-        static member inline RoundFloat32(a: float32<'u>) = LanguagePrimitives.Float32WithMeasure<'u>(float32(System.Math.Round(float a)))
+        static member inline RoundFloat(a: float<'u>) = LanguagePrimitives.FloatWithMeasure<'u>(NativeMath.round (float a))
+        static member inline RoundDecimal(a: decimal<'u>) = LanguagePrimitives.DecimalWithMeasure<'u>(NativeMath.roundDecimal (decimal a))
+        static member inline RoundFloat32(a: float32<'u>) = LanguagePrimitives.Float32WithMeasure<'u>(NativeMath.roundf (float32 a))
     
     /// <summary>
     /// Provides operations for unit-of-measure types with different measures
@@ -270,6 +578,8 @@ module Numerics =
         static member inline ModuloUInt64Units(a: uint64<'u1>, b: uint64<'u2>) = a % b
         static member inline ModuloFloat32Units(a: float32<'u1>, b: float32<'u2>) = a % b
         static member inline ModuloDecimalUnits(a: decimal<'u1>, b: decimal<'u2>) = a % b
+    
+    // ... (ArrayOps, MeasureArrayOps, MinMaxOperations remain the same) ...
     
     /// <summary>
     /// Provides collection operations for arrays of primitive types
@@ -384,7 +694,7 @@ module Numerics =
                 for i = 0 to xs.Length - 1 do sum <- sum + xs.[i]
                 sum / uint16 xs.Length
 
-        // New Product implementation for arrays
+        // Product implementation for arrays
         static member inline Product(xs: int[]) = 
             if xs.Length = 0 then 1
             else
@@ -495,7 +805,7 @@ module Numerics =
                 for i = 1 to xs.Length - 1 do sum <- sum + xs.[i]
                 sum / decimal xs.Length
 
-        // New Product implementation for unit-of-measure arrays
+        // Product implementation for unit-of-measure arrays
         static member inline ProductInt(xs: int<'u>[]) = 
             if xs.Length = 0 then LanguagePrimitives.GenericOne<int<'u>>
             else
@@ -582,7 +892,7 @@ module Numerics =
             static member MaxDecimal(a: decimal<'u>, b: decimal<'u>) : decimal<'u> = if a > b then a else b
     
     // --------------------------
-    // Entry point type interfaces
+    // Entry point type interfaces (same as before)
     // --------------------------
     
     /// <summary>
