@@ -1,80 +1,57 @@
-# Define paths
-$projectRoot = "D:\repos\fsharp-mlir-hello"
-$buildDir = "$projectRoot\build"
+# Cross-Platform Build script for HelloWorld example
 
-# Path to F# compiler - this should be the Visual Studio F# compiler
-# This is the typical location for the F# compiler with Visual Studio
-$fscPath = "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\FSharp\Tools\fsc.exe"
-
-# Check if the F# compiler exists at the specified path
-if (-not (Test-Path -Path $fscPath)) {
-    Write-Error "F# compiler not found at: $fscPath"
-    Write-Host "Looking for fsc.exe in other locations..."
-    
-    # Try to find fsc.exe in the system PATH
-    $fscInPath = Get-Command fsc.exe -ErrorAction SilentlyContinue
-    if ($fscInPath) {
-        $fscPath = $fscInPath.Source
-        Write-Host "Found F# compiler at: $fscPath"
-    } else {
-        # Try other common locations
-        $possibleLocations = @(
-            "C:\Program Files\dotnet\sdk\*\FSharp\fsc.exe",
-            "C:\Program Files (x86)\Microsoft Visual Studio\*\*\Common7\IDE\CommonExtensions\Microsoft\FSharp\fsc.exe"
-        )
-        
-        foreach ($location in $possibleLocations) {
-            $resolvedPaths = Resolve-Path -Path $location -ErrorAction SilentlyContinue
-            if ($resolvedPaths) {
-                $fscPath = $resolvedPaths[-1].Path  # Take the latest version
-                Write-Host "Found F# compiler at: $fscPath"
-                break
-            }
-        }
-    }
-    
-    if (-not (Test-Path -Path $fscPath)) {
-        Write-Error "Could not find F# compiler (fsc.exe) on your system."
-        Write-Error "Please install the F# compiler or provide the correct path to fsc.exe."
-        exit 1
-    }
+# Set paths based on platform
+if ($IsMacOS) {
+    $projectRoot = "$env:HOME/repos/fsharp-mlir-hello"
+    $fscPath = "fsc"  # Our wrapper
+} else {
+    $projectRoot = "D:\repos\fsharp-mlir-hello"
+    $fscPath = "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\FSharp\Tools\fsc.exe"
 }
 
-# Path to our custom FSharpCompilerService.dll
-$fscsPath = "$projectRoot\FSharpCompilerService\bin\Debug\net6.0\FSharp.Compiler.Service.dll"
+$buildDir = Join-Path $projectRoot "build"
+$fscsPath = Join-Path $projectRoot "FSharpCompilerService/bin/Debug/net6.0/FSharp.Compiler.Service.dll"
 
-# Create build directory if it doesn't exist
-if (-not (Test-Path -Path $buildDir)) {
-    New-Item -ItemType Directory -Path $buildDir
-}
+# Create build directory
+New-Item -ItemType Directory -Path $buildDir -Force -ErrorAction SilentlyContinue
 
-# Function to run the F# compiler (fsc.exe)
+# Function to run F# compiler
 function Invoke-FSC {
     & $fscPath $args
-    if (-not $?) {
-        Write-Error "F# compilation failed. See errors above."
-        exit 1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Build failed"
+        exit $LASTEXITCODE
     }
 }
 
-# Compile F# bindings library
-Write-Host "Compiling F# bindings library..."
-Invoke-FSC --out:$buildDir\FSharpMLIR.dll --target:library $projectRoot\src\Bindings\MLIRBindings.fs
+# Source paths
+$mlirBindingsPath = Join-Path $projectRoot "src/Bindings/MLIRBindings.fs"
+$mlirWrapperPath = Join-Path $projectRoot "src/Bindings/MLIRWrapper.fs"
+$astToMLIRPath = Join-Path $projectRoot "src/Conversion/ASTToMLIR.fs"
+$compilerPath = Join-Path $projectRoot "src/Pipeline/Compiler.fs"
+$helloWorldPath = Join-Path $projectRoot "src/Examples/HelloWorld.fs"
 
-# Compile the wrapper
-Write-Host "Compiling wrapper module..."
-Invoke-FSC --out:$buildDir\FSharpMLIRWrapper.dll --target:library --reference:$buildDir\FSharpMLIR.dll $projectRoot\src\Bindings\MLIRWrapper.fs
+# Build output paths
+$mlirDll = Join-Path $buildDir "FSharpMLIR.dll"
+$wrapperDll = Join-Path $buildDir "FSharpMLIRWrapper.dll"
+$conversionDll = Join-Path $buildDir "FSharpMLIRConversion.dll"
+$pipelineDll = Join-Path $buildDir "FSharpMLIRPipeline.dll"
+$helloWorldExe = Join-Path $buildDir "HelloWorld.exe"
 
-# Compile conversion modules with reference to our custom library
-Write-Host "Compiling conversion modules..."
-Invoke-FSC --out:$buildDir\FSharpMLIRConversion.dll --target:library --reference:$buildDir\FSharpMLIR.dll --reference:$buildDir\FSharpMLIRWrapper.dll --reference:$fscsPath $projectRoot\src\Conversion\ASTToMLIR.fs
+# Build steps
+Write-Host "Building F# MLIR bindings..."
+Invoke-FSC --out:$mlirDll --target:library $mlirBindingsPath
 
-# Compile the pipeline
-Write-Host "Compiling pipeline modules..."
-Invoke-FSC --out:$buildDir\FSharpMLIRPipeline.dll --target:library --reference:$buildDir\FSharpMLIR.dll --reference:$buildDir\FSharpMLIRWrapper.dll --reference:$buildDir\FSharpMLIRConversion.dll --reference:$fscsPath $projectRoot\src\Pipeline\Compiler.fs
+Write-Host "Building MLIR wrapper..."
+Invoke-FSC --out:$wrapperDll --target:library --reference:$mlirDll $mlirWrapperPath
 
-# Compile the example program
-Write-Host "Compiling example program..."
-Invoke-FSC --out:$buildDir\HelloWorld.exe --reference:$buildDir\FSharpMLIR.dll --reference:$buildDir\FSharpMLIRWrapper.dll --reference:$buildDir\FSharpMLIRConversion.dll --reference:$buildDir\FSharpMLIRPipeline.dll $projectRoot\src\Examples\HelloWorld.fs
+Write-Host "Building AST conversion..."
+Invoke-FSC --out:$conversionDll --target:library --reference:$mlirDll --reference:$wrapperDll --reference:$fscsPath $astToMLIRPath
+
+Write-Host "Building compiler pipeline..."
+Invoke-FSC --out:$pipelineDll --target:library --reference:$mlirDll --reference:$wrapperDll --reference:$conversionDll --reference:$fscsPath $compilerPath
+
+Write-Host "Building HelloWorld example..."
+Invoke-FSC --out:$helloWorldExe --reference:$mlirDll --reference:$wrapperDll --reference:$conversionDll --reference:$pipelineDll $helloWorldPath
 
 Write-Host "Build completed successfully."
