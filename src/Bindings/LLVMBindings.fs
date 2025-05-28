@@ -137,7 +137,7 @@ extern nativeint LLVMAddFunction(nativeint moduleHandle, string name, nativeint 
 #else // Linux
 [<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
 #endif
-extern nativeint LLVMFunctionType(nativeint returnType, nativeint* paramTypes, uint32 paramCount, bool isVarArg)
+extern nativeint LLVMFunctionType(nativeint returnType, nativeint* paramTypes, uint32 paramCount, int isVarArg)
 
 // LLVM Basic Blocks
 #if WINDOWS
@@ -213,7 +213,7 @@ extern nativeint LLVMBuildCall2(nativeint builder, nativeint functionType, nativ
 #else // Linux
 [<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
 #endif
-extern nativeint LLVMConstInt(nativeint intType, uint64 value, bool signExtend)
+extern nativeint LLVMConstInt(nativeint intType, uint64 value, int signExtend)
 
 #if WINDOWS
 [<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
@@ -231,9 +231,9 @@ extern nativeint LLVMConstReal(nativeint realType, double value)
 #else // Linux
 [<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
 #endif
-extern nativeint LLVMConstString(string str, uint32 length, bool dontNullTerminate)
+extern nativeint LLVMConstString(string str, uint32 length, int dontNullTerminate)
 
-// LLVM Target Machine
+// LLVM Target Machine - CORRECTED FUNCTION SIGNATURES
 #if WINDOWS
 [<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
 #elif MACOS
@@ -243,6 +243,7 @@ extern nativeint LLVMConstString(string str, uint32 length, bool dontNullTermina
 #endif
 extern nativeint LLVMGetDefaultTargetTriple()
 
+// Fixed: LLVMInitializeNativeTarget returns int (LLVMBool), not bool
 #if WINDOWS
 [<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
 #elif MACOS
@@ -250,8 +251,19 @@ extern nativeint LLVMGetDefaultTargetTriple()
 #else // Linux
 [<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
 #endif
-extern bool LLVMInitializeNativeTarget()
+extern int LLVMInitializeNativeTargetRaw()
 
+// Safe wrapper for LLVMInitializeNativeTarget
+let LLVMInitializeNativeTarget() : bool =
+    try
+        let result = LLVMInitializeNativeTargetRaw()
+        result = 0 // LLVM returns 0 for success
+    with
+    | ex ->
+        printfn "Error calling LLVMInitializeNativeTarget: %s" ex.Message
+        false
+
+// Fixed: LLVMInitializeNativeAsmPrinter returns int (LLVMBool), not bool
 #if WINDOWS
 [<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
 #elif MACOS
@@ -259,7 +271,17 @@ extern bool LLVMInitializeNativeTarget()
 #else // Linux
 [<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
 #endif
-extern bool LLVMInitializeNativeAsmPrinter()
+extern int LLVMInitializeNativeAsmPrinterRaw()
+
+// Safe wrapper for LLVMInitializeNativeAsmPrinter
+let LLVMInitializeNativeAsmPrinter() : bool =
+    try
+        let result = LLVMInitializeNativeAsmPrinterRaw()
+        result = 0 // LLVM returns 0 for success
+    with
+    | ex ->
+        printfn "Error calling LLVMInitializeNativeAsmPrinter: %s" ex.Message
+        false
 
 #if WINDOWS
 [<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
@@ -312,12 +334,22 @@ extern nativeint LLVMPrintModuleToFile(nativeint moduleHandle, string filename, 
 #else // Linux
 [<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
 #endif
-extern bool LLVMTargetMachineEmitToFile(
+extern int LLVMTargetMachineEmitToFileRaw(
     nativeint targetMachine,
     nativeint module',
     string filename,
     LLVMCodeGenFileType fileType,
     nativeint* errorMessage)
+
+// Safe wrapper for LLVMTargetMachineEmitToFile
+let LLVMTargetMachineEmitToFile(targetMachine: nativeint, module': nativeint, filename: string, fileType: LLVMCodeGenFileType, errorMessage: nativeint nativeptr) : bool =
+    try
+        let result = LLVMTargetMachineEmitToFileRaw(targetMachine, module', filename, fileType, errorMessage)
+        result = 0 // LLVM returns 0 for success
+    with
+    | ex ->
+        printfn "Error calling LLVMTargetMachineEmitToFile: %s" ex.Message
+        false
 
 // String cleanup
 #if WINDOWS
@@ -329,7 +361,7 @@ extern bool LLVMTargetMachineEmitToFile(
 #endif
 extern void LLVMDisposeMessage(nativeint message)
 
-// Verification
+// Verification - Fixed return type
 #if WINDOWS
 [<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
 #elif MACOS
@@ -337,7 +369,17 @@ extern void LLVMDisposeMessage(nativeint message)
 #else // Linux
 [<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
 #endif
-extern bool LLVMVerifyModule(nativeint module', LLVMVerifierFailureAction action, nativeint* outMessage)
+extern int LLVMVerifyModuleRaw(nativeint module', LLVMVerifierFailureAction action, nativeint* outMessage)
+
+// Safe wrapper for LLVMVerifyModule
+let LLVMVerifyModule(module': nativeint, action: LLVMVerifierFailureAction, outMessage: nativeint nativeptr) : bool =
+    try
+        let result = LLVMVerifyModuleRaw(module', action, outMessage)
+        result <> 0 // For verification, non-zero means error
+    with
+    | ex ->
+        printfn "Error calling LLVMVerifyModule: %s" ex.Message
+        true // Assume error if we can't verify
 
 // LLVM Pass Manager
 #if WINDOWS
@@ -365,7 +407,17 @@ extern void LLVMDisposePassManager(nativeint pm)
 #else // Linux
 [<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
 #endif
-extern bool LLVMRunPassManager(nativeint pm, nativeint m)
+extern int LLVMRunPassManagerRaw(nativeint pm, nativeint m)
+
+// Safe wrapper for LLVMRunPassManager
+let LLVMRunPassManager(pm: nativeint, m: nativeint) : bool =
+    try
+        let result = LLVMRunPassManagerRaw(pm, m)
+        result <> 0 // Non-zero indicates changes were made (success)
+    with
+    | ex ->
+        printfn "Error calling LLVMRunPassManager: %s" ex.Message
+        false
 
 // Common optimization passes
 #if WINDOWS
@@ -403,3 +455,18 @@ extern void LLVMAddGVNPass(nativeint pm)
 [<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
 #endif
 extern void LLVMAddCFGSimplificationPass(nativeint pm)
+
+// Get string from target triple
+let LLVMGetDefaultTargetTripleString() : string =
+    try
+        let ptr = LLVMGetDefaultTargetTriple()
+        if ptr = nativeint 0 then
+            "unknown-unknown-unknown"
+        else
+            let result = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(ptr)
+            LLVMDisposeMessage(ptr) // Clean up the string
+            if System.String.IsNullOrEmpty(result) then "unknown-unknown-unknown" else result
+    with
+    | ex ->
+        printfn "Error getting default target triple: %s" ex.Message
+        "unknown-unknown-unknown"
