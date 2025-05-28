@@ -30,11 +30,9 @@ module LibraryDiagnostics =
     /// </summary>
     let testLibraryFunction (libraryName: string) (functionName: string) =
         try
-            // Try to load the library using reflection to get better error info
             let assembly = System.Reflection.Assembly.GetExecutingAssembly()
             printfn "Testing library %s for function %s" libraryName functionName
             
-            // On macOS, try to load the library explicitly
             match getOS() with
             | PlatformOS.MacOS ->
                 let possiblePaths = [
@@ -43,19 +41,16 @@ module LibraryDiagnostics =
                     sprintf "/opt/homebrew/opt/llvm/lib/%s" libraryName
                 ]
                 
+                let mutable found = false
                 for path in possiblePaths do
-                    if File.Exists(path) then
+                    if File.Exists(path) && not found then
                         printfn "Found library at: %s" path
-                        // Try to get file info
                         let fileInfo = FileInfo(path)
                         printfn "Library size: %d bytes" fileInfo.Length
-                        return true
-                    else
-                        printfn "Library not found at: %s" path
+                        found <- true
                 
-                false
-            | _ ->
-                true // Assume other platforms work for now
+                found
+            | _ -> true
         with ex ->
             printfn "Error testing library %s: %s" libraryName ex.Message
             false
@@ -80,26 +75,36 @@ module LibraryDiagnostics =
         basicDiagnostics @ ["Library Tests:"] @ libraryResults
 
 /// <summary>
-/// Safe LLVM function calls with enhanced error reporting
+/// Enhanced LLVM function calls with comprehensive safety measures
 /// </summary>
 module SafeLLVMCalls =
     /// <summary>
-    /// Test LLVM library availability before making calls
+    /// Test basic LLVM library availability with minimal operations
     /// </summary>
     let testLLVMAvailability() : bool =
         try
-            printfn "Testing LLVM library availability..."
+            printfn "Testing LLVM library availability with minimal operations..."
             
-            // Try to call a simple LLVM function that should always work
-            let triplePtr = LLVMGetDefaultTargetTriple()
-            if triplePtr = nativeint 0 then
-                printfn "LLVMGetDefaultTargetTriple returned null"
+            // Try to initialize all LLVM components first
+            printfn "Initializing LLVM components..."
+            let initResult = LLVMInitializeAllSafe()
+            
+            if not initResult then
+                printfn "LLVM component initialization failed"
                 false
             else
-                let tripleStr = Marshal.PtrToStringAnsi(triplePtr)
-                printfn "LLVM library test successful. Target triple: %s" tripleStr
-                LLVMDisposeMessage(triplePtr)
-                true
+                printfn "LLVM components initialized successfully"
+                
+                // Test target triple retrieval
+                printfn "Testing target triple retrieval..."
+                let tripleStr = LLVMGetDefaultTargetTripleString()
+                
+                if tripleStr = "unknown-unknown-unknown" then
+                    printfn "Could not retrieve valid target triple"
+                    false  
+                else
+                    printfn "LLVM library test successful. Target triple: %s" tripleStr
+                    true
         with ex ->
             printfn "LLVM library test failed: %s" ex.Message
             printfn "Exception type: %s" (ex.GetType().Name)
@@ -108,79 +113,24 @@ module SafeLLVMCalls =
             false
 
     /// <summary>
-    /// Initialize LLVM native target with comprehensive error reporting
-    /// </summary>
-    let safeInitializeNativeTarget() : bool =
-        try
-            printfn "Attempting to initialize LLVM native target..."
-            
-            // First test if LLVM is available at all
-            if not (testLLVMAvailability()) then
-                printfn "LLVM library availability test failed"
-                false
-            else
-                printfn "LLVM library is available, proceeding with target initialization..."
-                
-                let result = LLVMInitializeNativeTargetSafe()
-                printfn "LLVMInitializeNativeTarget returned: %b" result
-                result
-        with
-        | :? DllNotFoundException as ex ->
-            printfn "DLL not found error: %s" ex.Message
-            printfn "Library name: %s" (if ex.Message.Contains("libLLVM") then "libLLVM.dylib" else "unknown")
-            false
-        | :? EntryPointNotFoundException as ex ->
-            printfn "Entry point not found: %s" ex.Message
-            printfn "This usually means the function name is incorrect or the library version is incompatible"
-            false
-        | :? System.AccessViolationException as ex ->
-            printfn "Access violation in LLVM call: %s" ex.Message
-            printfn "This suggests a problem with the native library or function signature"
-            false
-        | ex ->
-            printfn "Unexpected error initializing LLVM native target: %s" ex.Message
-            printfn "Exception type: %s" (ex.GetType().Name)
-            if ex.InnerException <> null then
-                printfn "Inner exception: %s" ex.InnerException.Message
-            false
-
-    /// <summary>  
-    /// Initialize LLVM ASM printer with comprehensive error reporting
-    /// </summary>
-    let safeInitializeNativeAsmPrinter() : bool =
-        try
-            printfn "Attempting to initialize LLVM ASM printer..."
-            let result = LLVMInitializeNativeAsmPrinterSafe()
-            printfn "LLVMInitializeNativeAsmPrinter returned: %b" result
-            result
-        with
-        | :? DllNotFoundException as ex ->
-            printfn "DLL not found error: %s" ex.Message
-            false
-        | :? EntryPointNotFoundException as ex ->
-            printfn "Entry point not found: %s" ex.Message
-            false
-        | :? System.AccessViolationException as ex ->
-            printfn "Access violation in LLVM ASM printer call: %s" ex.Message
-            false
-        | ex ->
-            printfn "Unexpected error initializing LLVM ASM printer: %s" ex.Message
-            printfn "Exception type: %s" (ex.GetType().Name)
-            false
-
-    /// <summary>
-    /// Create LLVM context with comprehensive error reporting
+    /// Create LLVM context with enhanced safety and validation
     /// </summary>
     let safeCreateLLVMContext() : nativeint =
         try
             printfn "Attempting to create LLVM context..."
-            let context = LLVMContextCreate()
-            if context = nativeint 0 then
-                printfn "LLVMContextCreate returned null"
+            
+            // Ensure LLVM is properly initialized first
+            if not (testLLVMAvailability()) then
+                printfn "LLVM not available, cannot create context"
                 nativeint 0
             else
-                printfn "LLVM context created successfully"
-                context
+                let context = LLVMContextCreate()
+                if context = nativeint 0 then
+                    printfn "LLVMContextCreate returned null"
+                    nativeint 0
+                else
+                    printfn "LLVM context created successfully"
+                    context
         with
         | :? DllNotFoundException as ex ->
             printfn "DLL not found error: %s" ex.Message
@@ -238,32 +188,26 @@ module FSharpParser =
             printfn "Parsing F# code from file: %s" fileName
             printfn "Code length: %d characters" fsharpCode.Length
             
-            // Create a SourceText from the code string
             let sourceText = SourceText.ofString fsharpCode
             
-            // Create a default checker instance
             let checker = FSharpChecker.Create()
             
-            // Get project options for a single file
             let projOptions = 
                 checker.GetProjectOptionsFromScript(
                     fileName,
                     sourceText,
                     assumeDotNetFramework = false)
                 |> Async.RunSynchronously
-                |> fst // Extract the first element of the tuple
+                |> fst
             
-            // Get parsing options
             let parsingOptions = 
                 checker.GetParsingOptionsFromProjectOptions(projOptions)
-                |> fst // Extract the first element, ignore diagnostics for now
+                |> fst
                 
-            // Parse the file using our parsing options
             let parseFileResults = 
                 checker.ParseFile(fileName, sourceText, parsingOptions)
                 |> Async.RunSynchronously
             
-            // Check for errors
             if parseFileResults.ParseHadErrors then
                 printfn "Parsing errors detected:"
                 parseFileResults.Diagnostics 
@@ -273,7 +217,6 @@ module FSharpParser =
                 printfn "F# parsing completed successfully"
                 match parseFileResults.ParseTree with
                 | ParsedInput.ImplFile(ParsedImplFileInput(_, _, _, _, _, modules, _, _, _)) ->
-                    // Return the first module if available
                     match modules with
                     | [] -> 
                         printfn "No modules found in parsed input"
@@ -300,21 +243,18 @@ module MLIRTransforms =
         printfn "Applying MLIR optimization passes"
         
         try
-            // Create a pass manager
             use passManager = MLIRPassManager.Create(mlirModule.Context)
             
-            // Add standard optimization passes
             passManager.AddCanonicalizer()
                 .AddCSE()
                 |> ignore
             
-            // Run the pass manager on the module
             let success = passManager.Run(mlirModule)
             
             if not success then
                 printfn "Warning: Pass manager execution was not fully successful"
                 printfn "Module after optimization passes:"
-                mlirModule.Dump() // Dump for debugging
+                mlirModule.Dump()
             else
                 printfn "Successfully applied optimization passes"
         with ex ->
@@ -329,19 +269,16 @@ module MLIRTransforms =
         printfn "Lowering MLIR to LLVM dialect"
         
         try
-            // Create a pass manager for lowering to LLVM
             use passManager = MLIRPassManager.Create(mlirModule.Context)
             
-            // Add the LowerToLLVM pass
             passManager.AddLowerToLLVM() |> ignore
             
-            // Run the pass manager on the module
             let success = passManager.Run(mlirModule)
             
             if not success then
                 printfn "Warning: Lowering to LLVM dialect was not fully successful"
                 printfn "Module after lowering:"
-                mlirModule.Dump() // Dump the module for debugging
+                mlirModule.Dump()
             else
                 printfn "Successfully lowered MLIR to LLVM dialect"
         with ex ->
@@ -350,7 +287,7 @@ module MLIRTransforms =
             printfn "Attempting to continue..."
 
 /// <summary>
-/// MLIR to LLVM conversion
+/// MLIR to LLVM conversion with enhanced safety
 /// </summary>
 module MLIRToLLVM =
     /// <summary>
@@ -373,7 +310,6 @@ module MLIRToLLVM =
         | PlatformOS.Linux, PlatformArch.Arm64 ->
             "e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128"
         | _ ->
-            // Default data layout for unknown platforms
             "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
             
     /// <summary>
@@ -431,16 +367,14 @@ module MLIRToLLVM =
             nativeint 0
 
     /// <summary>
-    /// Convert MLIR to LLVM IR with proper error handling
+    /// Convert MLIR to LLVM IR with comprehensive error handling and validation
     /// </summary>
     let convert (mlirModule: MLIRModule) : nativeint =
         printfn "Converting MLIR to LLVM IR"
         
         try
-            // First, apply LLVM dialect lowering
             MLIRTransforms.applyLowerToLLVMPasses mlirModule
             
-            // Create an LLVM context
             printfn "Creating LLVM context..."
             let llvmContext = SafeLLVMCalls.safeCreateLLVMContext()
             
@@ -450,7 +384,6 @@ module MLIRToLLVM =
             else
                 printfn "Successfully created LLVM context"
                 
-                // Create an LLVM module
                 let moduleName = "fidelity_module"
                 let llvmModule = 
                     try
@@ -467,11 +400,9 @@ module MLIRToLLVM =
                 else
                     printfn "Successfully created LLVM module"
                     
-                    // Set the target triple
                     let targetTriple = getDefaultTargetTriple()
                     printfn "Setting target triple: %s" targetTriple
                     
-                    // Set the data layout appropriate for the target
                     let dataLayout = getLLVMDataLayout()
                     printfn "Setting data layout: %s" dataLayout
                     
@@ -483,13 +414,11 @@ module MLIRToLLVM =
                     | ex ->
                         printfn "Warning: Failed to configure LLVM module: %s" ex.Message
                     
-                    // Convert MLIR module to LLVM IR
                     printfn "Translating MLIR to LLVM IR..."
                     match MLIRToLLVMConverter.convertModuleToLLVMIR mlirModule llvmModule with
                     | Ok() ->
                         printfn "Successfully converted MLIR to LLVM IR"
                         
-                        // Verify the module
                         printfn "Verifying LLVM module..."
                         let mutable errorMessage = nativeint 0
                         use errorMessagePin = fixed &errorMessage
@@ -509,11 +438,9 @@ module MLIRToLLVM =
                         | ex ->
                             printfn "Warning: LLVM module verification threw exception: %s" ex.Message
                         
-                        // Return the LLVM module
                         llvmModule
                     | Error msg ->
                         printfn "Error converting MLIR to LLVM IR: %s" msg
-                        // Clean up and return a null pointer
                         LLVMDisposeModule(llvmModule)
                         LLVMContextDispose(llvmContext)
                         nativeint 0
@@ -523,7 +450,7 @@ module MLIRToLLVM =
             nativeint 0
             
 /// <summary>
-/// LLVM optimization and code generation
+/// LLVM optimization and code generation with enhanced safety
 /// </summary>
 module LLVMCodeGen =
     /// <summary>
@@ -534,22 +461,18 @@ module LLVMCodeGen =
         
         if llvmModule <> nativeint 0 then
             try
-                // Create a pass manager
                 let passManager = LLVMCreatePassManager()
                 
                 if passManager = nativeint 0 then
                     printfn "Warning: Failed to create LLVM pass manager"
                 else
-                    // Add standard optimization passes
                     LLVMAddInstructionCombiningPass(passManager)
                     LLVMAddPromoteMemoryToRegisterPass(passManager)
                     LLVMAddGVNPass(passManager)
                     LLVMAddCFGSimplificationPass(passManager)
                     
-                    // Run the pass manager
                     let success = LLVMRunPassManager(passManager, llvmModule)
                     
-                    // Clean up
                     LLVMDisposePassManager(passManager)
                     
                     if not success then
@@ -561,7 +484,7 @@ module LLVMCodeGen =
                 printfn "Stack trace: %s" ex.StackTrace
     
     /// <summary>
-    /// Generate an object file from LLVM IR
+    /// Generate an object file from LLVM IR with comprehensive error handling
     /// </summary>
     let generateObjectFile (llvmModule: nativeint) (outputPath: string) : bool =
         printfn "Generating object file: %s" outputPath
@@ -571,11 +494,9 @@ module LLVMCodeGen =
             false
         else
             try
-                // Get the default target triple
                 let defaultTriple = getDefaultTargetTriple()
                 printfn "Using target triple: %s" defaultTriple
                 
-                // Get the target from triple
                 let mutable target = nativeint 0
                 let mutable errorMessage = nativeint 0
                 
@@ -587,13 +508,14 @@ module LLVMCodeGen =
                 
                 let getTargetResult = 
                     try
-                        LLVMGetTargetFromTriple(defaultTriple, NativePtr.ofNativeInt targetPtr, NativePtr.ofNativeInt errorPtr)
+                        let result = LLVMGetTargetFromTriple(defaultTriple, NativePtr.ofNativeInt targetPtr, NativePtr.ofNativeInt errorPtr)
+                        if result = 0 then 0 else 1 // Convert LLVMBool to int for consistency
                     with
                     | ex ->
                         printfn "Exception getting target from triple: %s" ex.Message
-                        nativeint 1 // Return non-zero to indicate failure
+                        1
                 
-                if getTargetResult <> nativeint 0 then
+                if getTargetResult <> 0 then
                     let errorPtr2 = MLIRToLLVM.safeReadPtr (NativePtr.ofNativeInt errorPtr)
                     let errorMsg = MLIRToLLVM.getLLVMString errorPtr2
                     printfn "Error: Failed to get target from triple: %s" errorMsg
@@ -601,19 +523,16 @@ module LLVMCodeGen =
                         LLVMDisposeMessage(errorPtr2)
                     false
                 else
-                    // Get the target from the pointer
                     target <- MLIRToLLVM.safeReadPtr (NativePtr.ofNativeInt targetPtr)
                     
                     if target = nativeint 0 then
                         printfn "Error: Failed to retrieve target"
                         false
                     else
-                        // Set CPU and features
                         let cpu = MLIRToLLVM.getCPUName()
                         let features = MLIRToLLVM.getTargetFeatures()
                         printfn "Using CPU: %s with features: %s" cpu features
                         
-                        // Create target machine
                         let targetMachine = 
                             try
                                 LLVMCreateTargetMachine(
@@ -635,7 +554,6 @@ module LLVMCodeGen =
                         else
                             printfn "Successfully created target machine"
                             
-                            // Emit object file
                             let mutable emitError = nativeint 0
                             use emitErrorPin = fixed &emitError
                             let emitErrorPtr = NativePtr.toNativeInt emitErrorPin
@@ -653,7 +571,6 @@ module LLVMCodeGen =
                                     printfn "Exception emitting object file: %s" ex.Message
                                     false
                             
-                            // Clean up
                             LLVMDisposeTargetMachine(targetMachine)
                             
                             if not success then
@@ -681,16 +598,12 @@ module Linker =
     let getLinkerCommand (objectFile: string) (outputPath: string) =
         match getOS() with
         | PlatformOS.MacOS ->
-            // Use clang on macOS for better compatibility
             ("clang", sprintf "-o \"%s\" \"%s\"" outputPath objectFile)
         | PlatformOS.Linux ->
-            // Use clang on Linux for consistency
             ("clang", sprintf "-o \"%s\" \"%s\"" outputPath objectFile)
         | PlatformOS.Windows ->
-            // Try clang first, fallback to link.exe
             ("clang", sprintf "-o \"%s\" \"%s\"" outputPath objectFile)
         | _ ->
-            // Universal fallback to clang
             ("clang", sprintf "-o \"%s\" \"%s\"" outputPath objectFile)
 
     /// <summary>
@@ -719,13 +632,11 @@ module Linker =
     let linkObjectFile (objectFile: string) (outputPath: string) : bool =
         printfn "Linking object file %s to %s" objectFile outputPath
         
-        // Make sure the object file exists
         if not (File.Exists(objectFile)) then
             printfn "Error: Object file does not exist: %s" objectFile
             false
         else
             try
-                // Get the appropriate linker command
                 let (linkerCmd, linkerArgs) = getLinkerCommand objectFile outputPath
                 
                 let processStartInfo = ProcessStartInfo(
@@ -753,7 +664,6 @@ module Linker =
                     printfn "%s linker error (exit code %d)" linkerCmd processInstance.ExitCode
                     false
                 else
-                    // Set executable permissions on Unix-like systems
                     setExecutablePermissions outputPath
                     
                     printfn "Successfully linked executable: %s" outputPath
@@ -765,7 +675,7 @@ module Linker =
                 false
 
 /// <summary>
-/// Main compiler pipeline
+/// Main compiler pipeline with enhanced initialization and error handling
 /// </summary>
 let compile (fileName: string) (fsharpCode: string) (outputPath: string) : bool =
     try
@@ -774,178 +684,146 @@ let compile (fileName: string) (fsharpCode: string) (outputPath: string) : bool 
         printfn "Output: %s" outputPath
         printfn "Platform: %A %A" (getOS()) (getArchitecture())
         
-        // Enhanced diagnostics
         printfn "=== Platform Diagnostics ==="
         LibraryDiagnostics.getEnhancedPlatformDiagnostics()
         |> List.iter (printfn "%s")
         
-        // Set up the native environment (PATH, etc.)
         try
             printfn "=== Setting up native environment ==="
             setupNativeEnvironment()
             printfn "✓ Native environment setup completed"
             
-            // Test LLVM availability before proceeding
             printfn "=== Testing LLVM availability ==="
             if not (SafeLLVMCalls.testLLVMAvailability()) then
                 printfn "❌ LLVM library test failed - cannot proceed"
                 false
             else
-                // Initialize LLVM native target
-                printfn "=== Initializing LLVM ==="
-                let targetInitSuccess = SafeLLVMCalls.safeInitializeNativeTarget()
-                if not targetInitSuccess then
-                    printfn "❌ Failed to initialize LLVM native target - cannot proceed"
-                    false
-                else
-                    printfn "✓ LLVM native target initialized successfully"
+                printfn "✓ LLVM availability test passed"
+                
+                try
+                    printfn "=== Parsing F# code ==="
+                    let astOption = FSharpParser.parseProgram fileName fsharpCode
                     
-                    // Initialize LLVM ASM printer
-                    let asmPrinterSuccess = SafeLLVMCalls.safeInitializeNativeAsmPrinter()
-                    if not asmPrinterSuccess then
-                        printfn "⚠ Warning: Failed to initialize LLVM ASM printer - continuing anyway"
-                    else
-                        printfn "✓ LLVM ASM printer initialized successfully"
-                    
-                    // Parse F# code to get AST
-                    try
-                        printfn "=== Parsing F# code ==="
-                        let astOption = FSharpParser.parseProgram fileName fsharpCode
-                        
-                        match astOption with
-                        | None ->
-                            printfn "❌ Failed to parse F# code"
-                            false
-                        | Some ast ->
-                            try
-                                printfn "✓ F# parsing successful"
+                    match astOption with
+                    | None ->
+                        printfn "❌ Failed to parse F# code"
+                        false
+                    | Some ast ->
+                        try
+                            printfn "✓ F# parsing successful"
+                            
+                            printfn "=== Creating MLIR context ==="
+                            let mlirContextHandle = SafeLLVMCalls.safeCreateMLIRContext()
+                            
+                            if mlirContextHandle = nativeint 0 then
+                                printfn "❌ Failed to create MLIR context"
+                                false
+                            else
+                                use context = new MLIRContext(mlirContextHandle)
+                                printfn "✓ MLIR context created"
                                 
-                                // Create MLIR context and module
-                                printfn "=== Creating MLIR context ==="
-                                let mlirContextHandle = SafeLLVMCalls.safeCreateMLIRContext()
+                                printfn "=== Creating MLIR module ==="
+                                use mlirModule = MLIRModule.CreateEmpty(context)
+                                printfn "✓ MLIR module created"
                                 
-                                if mlirContextHandle = nativeint 0 then
-                                    printfn "❌ Failed to create MLIR context"
+                                printfn "=== Converting F# AST to MLIR ==="
+                                let converter = ASTToMLIR.Converter(context)
+                                converter.ConvertModule(mlirModule, ast)
+                                printfn "✓ AST to MLIR conversion completed"
+                                
+                                printfn "=== Verifying MLIR module ==="
+                                if not (mlirModule.Verify()) then
+                                    printfn "⚠ Warning: MLIR module verification failed"
+                                    printfn "MLIR module content:"
+                                    mlirModule.Dump()
+                                else
+                                    printfn "✓ MLIR module verification successful"
+                                    
+                                printfn "=== Applying MLIR optimization passes ==="
+                                MLIRTransforms.applyOptimizationPasses mlirModule
+                                printfn "✓ MLIR optimization passes completed"
+                                
+                                printfn "=== Converting MLIR to LLVM IR ==="
+                                let llvmModule = MLIRToLLVM.convert mlirModule
+                                
+                                if llvmModule = nativeint 0 then
+                                    printfn "❌ Failed to convert MLIR to LLVM IR"
                                     false
                                 else
-                                    use context = new MLIRContext(mlirContextHandle)
-                                    printfn "✓ MLIR context created"
+                                    printfn "✓ MLIR to LLVM conversion successful"
                                     
-                                    printfn "=== Creating MLIR module ==="
-                                    use mlirModule = MLIRModule.CreateEmpty(context)
-                                    printfn "✓ MLIR module created"
+                                    printfn "=== Applying LLVM optimization passes ==="
+                                    LLVMCodeGen.applyOptimizationPasses llvmModule
+                                    printfn "✓ LLVM optimization passes completed"
                                     
-                                    // Convert F# AST to MLIR
-                                    printfn "=== Converting F# AST to MLIR ==="
-                                    let converter = ASTToMLIR.Converter(context)
-                                    converter.ConvertModule(mlirModule, ast)
-                                    printfn "✓ AST to MLIR conversion completed"
-                                    
-                                    // Verify the MLIR module
-                                    printfn "=== Verifying MLIR module ==="
-                                    if not (mlirModule.Verify()) then
-                                        printfn "⚠ Warning: MLIR module verification failed"
-                                        printfn "MLIR module content:"
-                                        mlirModule.Dump()
-                                    else
-                                        printfn "✓ MLIR module verification successful"
+                                    let tempDir = Path.Combine(Path.GetTempPath(), "FSharpMLIR")
+                                    if not (Directory.Exists(tempDir)) then
+                                        Directory.CreateDirectory(tempDir) |> ignore
                                         
-                                    // Apply MLIR optimization passes
-                                    printfn "=== Applying MLIR optimization passes ==="
-                                    MLIRTransforms.applyOptimizationPasses mlirModule
-                                    printfn "✓ MLIR optimization passes completed"
+                                    let objFile = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(outputPath) + ".o")
                                     
-                                    // Convert MLIR to LLVM IR
-                                    printfn "=== Converting MLIR to LLVM IR ==="
-                                    let llvmModule = MLIRToLLVM.convert mlirModule
+                                    printfn "=== Generating object file ==="
+                                    printfn "Object file path: %s" objFile
+                                    let objSuccess = LLVMCodeGen.generateObjectFile llvmModule objFile
                                     
-                                    if llvmModule = nativeint 0 then
-                                        printfn "❌ Failed to convert MLIR to LLVM IR"
+                                    try
+                                        LLVMDisposeModule(llvmModule)
+                                    with
+                                    | ex ->
+                                        printfn "Warning: Error disposing LLVM module: %s" ex.Message
+                                    
+                                    if not objSuccess then
+                                        printfn "❌ Failed to generate object file"
                                         false
                                     else
-                                        printfn "✓ MLIR to LLVM conversion successful"
+                                        printfn "✓ Object file generation successful"
                                         
-                                        // Apply LLVM optimization passes
-                                        printfn "=== Applying LLVM optimization passes ==="
-                                        LLVMCodeGen.applyOptimizationPasses llvmModule
-                                        printfn "✓ LLVM optimization passes completed"
-                                        
-                                        // Create temporary directory if it doesn't exist
-                                        let tempDir = Path.Combine(Path.GetTempPath(), "FSharpMLIR")
-                                        if not (Directory.Exists(tempDir)) then
-                                            Directory.CreateDirectory(tempDir) |> ignore
+                                        if File.Exists(objFile) then
+                                            let objFileInfo = FileInfo(objFile)
+                                            printfn "Object file size: %d bytes" objFileInfo.Length
                                             
-                                        // Generate temporary object file
-                                        let objFile = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(outputPath) + ".o")
+                                            if objFileInfo.Length < 100L then
+                                                printfn "⚠ Warning: Object file seems very small - may be empty or corrupted"
                                         
-                                        printfn "=== Generating object file ==="
-                                        printfn "Object file path: %s" objFile
-                                        let objSuccess = LLVMCodeGen.generateObjectFile llvmModule objFile
+                                        printfn "=== Linking to create executable ==="
+                                        let linkSuccess = Linker.linkObjectFile objFile outputPath
                                         
-                                        // Clean up LLVM module
                                         try
-                                            LLVMDisposeModule(llvmModule)
-                                        with
-                                        | ex ->
-                                            printfn "Warning: Error disposing LLVM module: %s" ex.Message
+                                            if File.Exists(objFile) then
+                                                File.Delete(objFile)
+                                        with ex ->
+                                            printfn "Warning: Could not delete temporary object file: %s" ex.Message
                                         
-                                        if not objSuccess then
-                                            printfn "❌ Failed to generate object file"
+                                        try
+                                            if Directory.Exists(tempDir) && Directory.GetFiles(tempDir).Length = 0 then
+                                                Directory.Delete(tempDir)
+                                        with ex ->
+                                            printfn "Warning: Could not delete temporary directory: %s" ex.Message
+                                        
+                                        if not linkSuccess then
+                                            printfn "❌ Failed to link executable"
                                             false
                                         else
-                                            printfn "✓ Object file generation successful"
-                                            
-                                            // Verify object file was created and has reasonable size
-                                            if File.Exists(objFile) then
-                                                let objFileInfo = FileInfo(objFile)
-                                                printfn "Object file size: %d bytes" objFileInfo.Length
+                                            if File.Exists(outputPath) then
+                                                let execInfo = FileInfo(outputPath)
+                                                printfn "✓ Successfully compiled %s to %s" fileName outputPath
+                                                printfn "Final executable size: %d bytes" execInfo.Length
                                                 
-                                                if objFileInfo.Length < 100L then
-                                                    printfn "⚠ Warning: Object file seems very small - may be empty or corrupted"
-                                            
-                                            // Link to produce executable
-                                            printfn "=== Linking to create executable ==="
-                                            let linkSuccess = Linker.linkObjectFile objFile outputPath
-                                            
-                                            // Clean up temporary object file
-                                            try
-                                                if File.Exists(objFile) then
-                                                    File.Delete(objFile)
-                                            with ex ->
-                                                printfn "Warning: Could not delete temporary object file: %s" ex.Message
-                                            
-                                            // Clean up temporary directory if it's empty
-                                            try
-                                                if Directory.Exists(tempDir) && Directory.GetFiles(tempDir).Length = 0 then
-                                                    Directory.Delete(tempDir)
-                                            with ex ->
-                                                printfn "Warning: Could not delete temporary directory: %s" ex.Message
-                                            
-                                            if not linkSuccess then
-                                                printfn "❌ Failed to link executable"
-                                                false
+                                                if execInfo.Length < 1000L then
+                                                    printfn "⚠ Warning: Executable seems very small - may not be a native binary"
+                                                
+                                                true
                                             else
-                                                // Verify final executable
-                                                if File.Exists(outputPath) then
-                                                    let execInfo = FileInfo(outputPath)
-                                                    printfn "✓ Successfully compiled %s to %s" fileName outputPath
-                                                    printfn "Final executable size: %d bytes" execInfo.Length
-                                                    
-                                                    if execInfo.Length < 1000L then
-                                                        printfn "⚠ Warning: Executable seems very small - may not be a native binary"
-                                                    
-                                                    true
-                                                else
-                                                    printfn "❌ Executable file was not created at expected location: %s" outputPath
-                                                    false
-                            with ex ->
-                                printfn "Error during MLIR/LLVM processing: %s" ex.Message
-                                printfn "Stack trace: %s" ex.StackTrace
-                                false
-                    with ex ->
-                        printfn "Error during F# parsing: %s" ex.Message
-                        printfn "Stack trace: %s" ex.StackTrace
-                        false
+                                                printfn "❌ Executable file was not created at expected location: %s" outputPath
+                                                false
+                        with ex ->
+                            printfn "Error during MLIR/LLVM processing: %s" ex.Message
+                            printfn "Stack trace: %s" ex.StackTrace
+                            false
+                with ex ->
+                    printfn "Error during F# parsing: %s" ex.Message
+                    printfn "Stack trace: %s" ex.StackTrace
+                    false
         with ex ->
             printfn "❌ Native environment setup failed: %s" ex.Message
             printfn "Stack trace: %s" ex.StackTrace
@@ -1047,10 +925,9 @@ let main (args: string[]) =
                 | Some file -> file
                 | None ->
                     let baseName = Path.GetFileNameWithoutExtension(options.InputFile)
-                    // Only Windows uses .exe extension for executables
                     match getOS() with
                     | PlatformOS.Windows -> baseName + ".exe"
-                    | _ -> baseName  // Unix-like systems don't use extensions for executables
+                    | _ -> baseName
             
             if options.Verbose then
                 printfn "======================================================"
