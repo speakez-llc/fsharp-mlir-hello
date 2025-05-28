@@ -4,6 +4,10 @@ open System
 open System.Runtime.InteropServices
 open FSharpMLIR.PlatformUtils
 
+// =============================================================================
+// LLVM Type Definitions
+// =============================================================================
+
 // LLVM Boolean type - uses int32 internally
 type LLVMBool = int32
 
@@ -250,1944 +254,1145 @@ type LLVMTypeKind =
     | X86_AMX = 19
     | TargetExt = 20
 
-// Get the native library name for the current platform
-let private getNativeLibraryName() =
-    match getOS() with
-    | PlatformOS.Windows -> "LLVM.dll"
-    | PlatformOS.MacOS -> "libLLVM.dylib"
-    | PlatformOS.Linux -> "libLLVM.so"
-    | _ -> "libLLVM.so"
-
-let private libraryName = getNativeLibraryName()
-
 // =============================================================================
-// LLVM Context Functions
+// Dynamic Library Loading
 // =============================================================================
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMContextRef LLVMContextCreate()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMContextRef LLVMGetGlobalContext()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMContextDispose(LLVMContextRef context)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMContextSetDiscardValueNames(LLVMContextRef C, LLVMBool Discard)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMContextShouldDiscardValueNames(LLVMContextRef C)
-
-// =============================================================================
-// LLVM Module Functions
-// =============================================================================
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMModuleRef LLVMModuleCreateWithName([<MarshalAs(UnmanagedType.LPStr)>] string ModuleID)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMModuleRef LLVMModuleCreateWithNameInContext([<MarshalAs(UnmanagedType.LPStr)>] string ModuleID, LLVMContextRef C)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMModuleRef LLVMCloneModule(LLVMModuleRef M)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMDisposeModule(LLVMModuleRef M)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMGetModuleIdentifier(LLVMModuleRef M, nativeint Len)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetModuleIdentifier(LLVMModuleRef M, [<MarshalAs(UnmanagedType.LPStr)>] string Ident, uint32 Len)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMGetSourceFileName(LLVMModuleRef M, nativeint Len)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetSourceFileName(LLVMModuleRef M, [<MarshalAs(UnmanagedType.LPStr)>] string Name, uint32 Len)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMGetDataLayoutStr(LLVMModuleRef M)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetDataLayout(LLVMModuleRef M, [<MarshalAs(UnmanagedType.LPStr)>] string DataLayoutStr)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMGetTarget(LLVMModuleRef M)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetTarget(LLVMModuleRef M, [<MarshalAs(UnmanagedType.LPStr)>] string Triple)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMDumpModule(LLVMModuleRef M)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMPrintModuleToFile(LLVMModuleRef M, [<MarshalAs(UnmanagedType.LPStr)>] string Filename, nativeint ErrorMessage)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMPrintModuleToString(LLVMModuleRef M)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMVerifyModule(LLVMModuleRef M, LLVMVerifierFailureAction Action, nativeint OutMessage)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMContextRef LLVMGetModuleContext(LLVMModuleRef M)
+module private NativeLibrary =
+    let private getLibraryName() =
+        match getOS() with
+        | PlatformOS.Windows -> "LLVM.dll"
+        | PlatformOS.MacOS -> "libLLVM.dylib"
+        | PlatformOS.Linux -> "libLLVM.so"
+        | _ -> "libLLVM.so"
+    
+    let private libraryHandle = 
+        lazy (
+            let libName = getLibraryName()
+            let handle = 
+                if Environment.OSVersion.Platform = PlatformID.Win32NT then
+                    LoadLibrary(libName)
+                else
+                    dlopen(libName, 1) // RTLD_LAZY
+            
+            if handle = nativeint.Zero then
+                failwithf "Failed to load LLVM library: %s" libName
+            handle
+        )
+    
+    [<DllImport("kernel32.dll", SetLastError = true)>]
+    extern nativeint LoadLibrary(string lpFileName)
+    
+    [<DllImport("kernel32.dll", SetLastError = true)>]
+    extern nativeint GetProcAddress(nativeint hModule, string lpProcName)
+    
+    [<DllImport("libdl.so", SetLastError = true)>]
+    extern nativeint dlopen(string filename, int flags)
+    
+    [<DllImport("libdl.so", SetLastError = true)>]
+    extern nativeint dlsym(nativeint handle, string symbol)
+    
+    let getFunction<'T> (name: string) : 'T =
+        let funcPtr = 
+            if Environment.OSVersion.Platform = PlatformID.Win32NT then
+                GetProcAddress(libraryHandle.Value, name)
+            else
+                dlsym(libraryHandle.Value, name)
+        
+        if funcPtr = nativeint.Zero then
+            failwithf "Function %s not found in LLVM library" name
+        
+        Marshal.GetDelegateForFunctionPointer<'T>(funcPtr)
 
 // =============================================================================
-// LLVM Type Functions
+// Function Delegate Types
 // =============================================================================
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeKind LLVMGetTypeKind(LLVMTypeRef Ty)
+// Context Functions
+type LLVMContextCreateDelegate = delegate of unit -> LLVMContextRef
+type LLVMGetGlobalContextDelegate = delegate of unit -> LLVMContextRef
+type LLVMContextDisposeDelegate = delegate of LLVMContextRef -> unit
+type LLVMContextSetDiscardValueNamesDelegate = delegate of LLVMContextRef * LLVMBool -> unit
+type LLVMContextShouldDiscardValueNamesDelegate = delegate of LLVMContextRef -> LLVMBool
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMTypeIsSized(LLVMTypeRef Ty)
+// Module Functions
+type LLVMModuleCreateWithNameDelegate = delegate of string -> LLVMModuleRef
+type LLVMModuleCreateWithNameInContextDelegate = delegate of string * LLVMContextRef -> LLVMModuleRef
+type LLVMCloneModuleDelegate = delegate of LLVMModuleRef -> LLVMModuleRef
+type LLVMDisposeModuleDelegate = delegate of LLVMModuleRef -> unit
+type LLVMGetModuleIdentifierDelegate = delegate of LLVMModuleRef * nativeint -> nativeint
+type LLVMSetModuleIdentifierDelegate = delegate of LLVMModuleRef * string * uint32 -> unit
+type LLVMGetSourceFileNameDelegate = delegate of LLVMModuleRef * nativeint -> nativeint
+type LLVMSetSourceFileNameDelegate = delegate of LLVMModuleRef * string * uint32 -> unit
+type LLVMGetDataLayoutStrDelegate = delegate of LLVMModuleRef -> nativeint
+type LLVMSetDataLayoutDelegate = delegate of LLVMModuleRef * string -> unit
+type LLVMGetTargetDelegate = delegate of LLVMModuleRef -> nativeint
+type LLVMSetTargetDelegate = delegate of LLVMModuleRef * string -> unit
+type LLVMDumpModuleDelegate = delegate of LLVMModuleRef -> unit
+type LLVMPrintModuleToFileDelegate = delegate of LLVMModuleRef * string * nativeint -> LLVMBool
+type LLVMPrintModuleToStringDelegate = delegate of LLVMModuleRef -> nativeint
+type LLVMVerifyModuleDelegate = delegate of LLVMModuleRef * LLVMVerifierFailureAction * nativeint -> LLVMBool
+type LLVMGetModuleContextDelegate = delegate of LLVMModuleRef -> LLVMContextRef
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMContextRef LLVMGetTypeContext(LLVMTypeRef Ty)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMDumpType(LLVMTypeRef Ty)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMPrintTypeToString(LLVMTypeRef Ty)
+// Type Functions
+type LLVMGetTypeKindDelegate = delegate of LLVMTypeRef -> LLVMTypeKind
+type LLVMTypeIsSizedDelegate = delegate of LLVMTypeRef -> LLVMBool
+type LLVMGetTypeContextDelegate = delegate of LLVMTypeRef -> LLVMContextRef
+type LLVMDumpTypeDelegate = delegate of LLVMTypeRef -> unit
+type LLVMPrintTypeToStringDelegate = delegate of LLVMTypeRef -> nativeint
 
 // Integer types
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMInt1TypeInContext(LLVMContextRef C)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMInt8TypeInContext(LLVMContextRef C)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMInt16TypeInContext(LLVMContextRef C)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMInt32TypeInContext(LLVMContextRef C)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMInt64TypeInContext(LLVMContextRef C)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMInt128TypeInContext(LLVMContextRef C)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMIntTypeInContext(LLVMContextRef C, uint32 NumBits)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMGetIntTypeWidth(LLVMTypeRef IntegerTy)
+type LLVMInt1TypeInContextDelegate = delegate of LLVMContextRef -> LLVMTypeRef
+type LLVMInt8TypeInContextDelegate = delegate of LLVMContextRef -> LLVMTypeRef
+type LLVMInt16TypeInContextDelegate = delegate of LLVMContextRef -> LLVMTypeRef
+type LLVMInt32TypeInContextDelegate = delegate of LLVMContextRef -> LLVMTypeRef
+type LLVMInt64TypeInContextDelegate = delegate of LLVMContextRef -> LLVMTypeRef
+type LLVMInt128TypeInContextDelegate = delegate of LLVMContextRef -> LLVMTypeRef
+type LLVMIntTypeInContextDelegate = delegate of LLVMContextRef * uint32 -> LLVMTypeRef
+type LLVMGetIntTypeWidthDelegate = delegate of LLVMTypeRef -> uint32
 
 // Floating point types
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMHalfTypeInContext(LLVMContextRef C)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMBFloatTypeInContext(LLVMContextRef C)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMFloatTypeInContext(LLVMContextRef C)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMDoubleTypeInContext(LLVMContextRef C)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMX86FP80TypeInContext(LLVMContextRef C)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMFP128TypeInContext(LLVMContextRef C)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMPPCFP128TypeInContext(LLVMContextRef C)
+type LLVMHalfTypeInContextDelegate = delegate of LLVMContextRef -> LLVMTypeRef
+type LLVMBFloatTypeInContextDelegate = delegate of LLVMContextRef -> LLVMTypeRef
+type LLVMFloatTypeInContextDelegate = delegate of LLVMContextRef -> LLVMTypeRef
+type LLVMDoubleTypeInContextDelegate = delegate of LLVMContextRef -> LLVMTypeRef
+type LLVMX86FP80TypeInContextDelegate = delegate of LLVMContextRef -> LLVMTypeRef
+type LLVMFP128TypeInContextDelegate = delegate of LLVMContextRef -> LLVMTypeRef
+type LLVMPPCFP128TypeInContextDelegate = delegate of LLVMContextRef -> LLVMTypeRef
 
 // Other types
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMVoidTypeInContext(LLVMContextRef C)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMLabelTypeInContext(LLVMContextRef C)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMX86AMXTypeInContext(LLVMContextRef C)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMTokenTypeInContext(LLVMContextRef C)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMMetadataTypeInContext(LLVMContextRef C)
+type LLVMVoidTypeInContextDelegate = delegate of LLVMContextRef -> LLVMTypeRef
+type LLVMLabelTypeInContextDelegate = delegate of LLVMContextRef -> LLVMTypeRef
+type LLVMX86AMXTypeInContextDelegate = delegate of LLVMContextRef -> LLVMTypeRef
+type LLVMTokenTypeInContextDelegate = delegate of LLVMContextRef -> LLVMTypeRef
+type LLVMMetadataTypeInContextDelegate = delegate of LLVMContextRef -> LLVMTypeRef
 
 // Pointer types
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMPointerType(LLVMTypeRef ElementType, uint32 AddressSpace)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMPointerTypeInContext(LLVMContextRef C, uint32 AddressSpace)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMPointerTypeIsOpaque(LLVMTypeRef Ty)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMGetPointerAddressSpace(LLVMTypeRef PointerTy)
+type LLVMPointerTypeDelegate = delegate of LLVMTypeRef * uint32 -> LLVMTypeRef
+type LLVMPointerTypeInContextDelegate = delegate of LLVMContextRef * uint32 -> LLVMTypeRef
+type LLVMPointerTypeIsOpaqueDelegate = delegate of LLVMTypeRef -> LLVMBool
+type LLVMGetPointerAddressSpaceDelegate = delegate of LLVMTypeRef -> uint32
 
 // Function types
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMFunctionType(LLVMTypeRef ReturnType, nativeint ParamTypes, uint32 ParamCount, LLVMBool IsVarArg)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMIsFunctionVarArg(LLVMTypeRef FunctionTy)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMGetReturnType(LLVMTypeRef FunctionTy)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMCountParamTypes(LLVMTypeRef FunctionTy)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMGetParamTypes(LLVMTypeRef FunctionTy, nativeint Dest)
+type LLVMFunctionTypeDelegate = delegate of LLVMTypeRef * nativeint * uint32 * LLVMBool -> LLVMTypeRef
+type LLVMIsFunctionVarArgDelegate = delegate of LLVMTypeRef -> LLVMBool
+type LLVMGetReturnTypeDelegate = delegate of LLVMTypeRef -> LLVMTypeRef
+type LLVMCountParamTypesDelegate = delegate of LLVMTypeRef -> uint32
+type LLVMGetParamTypesDelegate = delegate of LLVMTypeRef * nativeint -> unit
 
 // Array types
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMArrayType(LLVMTypeRef ElementType, uint32 ElementCount)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMArrayType2(LLVMTypeRef ElementType, uint64 ElementCount)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMGetArrayLength(LLVMTypeRef ArrayTy)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint64 LLVMGetArrayLength2(LLVMTypeRef ArrayTy)
+type LLVMArrayTypeDelegate = delegate of LLVMTypeRef * uint32 -> LLVMTypeRef
+type LLVMArrayType2Delegate = delegate of LLVMTypeRef * uint64 -> LLVMTypeRef
+type LLVMGetArrayLengthDelegate = delegate of LLVMTypeRef -> uint32
+type LLVMGetArrayLength2Delegate = delegate of LLVMTypeRef -> uint64
 
 // Vector types
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMVectorType(LLVMTypeRef ElementType, uint32 ElementCount)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMScalableVectorType(LLVMTypeRef ElementType, uint32 ElementCount)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMGetVectorSize(LLVMTypeRef VectorTy)
+type LLVMVectorTypeDelegate = delegate of LLVMTypeRef * uint32 -> LLVMTypeRef
+type LLVMScalableVectorTypeDelegate = delegate of LLVMTypeRef * uint32 -> LLVMTypeRef
+type LLVMGetVectorSizeDelegate = delegate of LLVMTypeRef -> uint32
 
 // Sequential types
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMGetElementType(LLVMTypeRef Ty)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMGetSubtypes(LLVMTypeRef Tp, nativeint Arr)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMGetNumContainedTypes(LLVMTypeRef Tp)
+type LLVMGetElementTypeDelegate = delegate of LLVMTypeRef -> LLVMTypeRef
+type LLVMGetSubtypesDelegate = delegate of LLVMTypeRef * nativeint -> unit
+type LLVMGetNumContainedTypesDelegate = delegate of LLVMTypeRef -> uint32
 
 // Struct types
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMStructTypeInContext(LLVMContextRef C, nativeint ElementTypes, uint32 ElementCount, LLVMBool Packed)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMStructType(nativeint ElementTypes, uint32 ElementCount, LLVMBool Packed)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMStructCreateNamed(LLVMContextRef C, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMGetStructName(LLVMTypeRef Ty)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMStructSetBody(LLVMTypeRef StructTy, nativeint ElementTypes, uint32 ElementCount, LLVMBool Packed)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMCountStructElementTypes(LLVMTypeRef StructTy)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMGetStructElementTypes(LLVMTypeRef StructTy, nativeint Dest)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMStructGetTypeAtIndex(LLVMTypeRef StructTy, uint32 i)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMIsPackedStruct(LLVMTypeRef StructTy)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMIsOpaqueStruct(LLVMTypeRef StructTy)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMIsLiteralStruct(LLVMTypeRef StructTy)
+type LLVMStructTypeInContextDelegate = delegate of LLVMContextRef * nativeint * uint32 * LLVMBool -> LLVMTypeRef
+type LLVMStructTypeDelegate = delegate of nativeint * uint32 * LLVMBool -> LLVMTypeRef
+type LLVMStructCreateNamedDelegate = delegate of LLVMContextRef * string -> LLVMTypeRef
+type LLVMGetStructNameDelegate = delegate of LLVMTypeRef -> nativeint
+type LLVMStructSetBodyDelegate = delegate of LLVMTypeRef * nativeint * uint32 * LLVMBool -> unit
+type LLVMCountStructElementTypesDelegate = delegate of LLVMTypeRef -> uint32
+type LLVMGetStructElementTypesDelegate = delegate of LLVMTypeRef * nativeint -> unit
+type LLVMStructGetTypeAtIndexDelegate = delegate of LLVMTypeRef * uint32 -> LLVMTypeRef
+type LLVMIsPackedStructDelegate = delegate of LLVMTypeRef -> LLVMBool
+type LLVMIsOpaqueStructDelegate = delegate of LLVMTypeRef -> LLVMBool
+type LLVMIsLiteralStructDelegate = delegate of LLVMTypeRef -> LLVMBool
 
 // Global context versions
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMInt1Type()
+type LLVMInt1TypeDelegate = delegate of unit -> LLVMTypeRef
+type LLVMInt8TypeDelegate = delegate of unit -> LLVMTypeRef
+type LLVMInt16TypeDelegate = delegate of unit -> LLVMTypeRef
+type LLVMInt32TypeDelegate = delegate of unit -> LLVMTypeRef
+type LLVMInt64TypeDelegate = delegate of unit -> LLVMTypeRef
+type LLVMInt128TypeDelegate = delegate of unit -> LLVMTypeRef
+type LLVMIntTypeDelegate = delegate of uint32 -> LLVMTypeRef
+type LLVMHalfTypeDelegate = delegate of unit -> LLVMTypeRef
+type LLVMBFloatTypeDelegate = delegate of unit -> LLVMTypeRef
+type LLVMFloatTypeDelegate = delegate of unit -> LLVMTypeRef
+type LLVMDoubleTypeDelegate = delegate of unit -> LLVMTypeRef
+type LLVMX86FP80TypeDelegate = delegate of unit -> LLVMTypeRef
+type LLVMFP128TypeDelegate = delegate of unit -> LLVMTypeRef
+type LLVMPPCFP128TypeDelegate = delegate of unit -> LLVMTypeRef
+type LLVMVoidTypeDelegate = delegate of unit -> LLVMTypeRef
+type LLVMLabelTypeDelegate = delegate of unit -> LLVMTypeRef
+type LLVMX86AMXTypeDelegate = delegate of unit -> LLVMTypeRef
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMInt8Type()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMInt16Type()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMInt32Type()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMInt64Type()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMInt128Type()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMIntType(uint32 NumBits)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMHalfType()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMBFloatType()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMFloatType()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMDoubleType()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMX86FP80Type()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMFP128Type()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMPPCFP128Type()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMVoidType()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMLabelType()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMX86AMXType()
-
-// =============================================================================
-// LLVM Value and Constant Functions
-// =============================================================================
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMTypeOf(LLVMValueRef Val)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMDumpValue(LLVMValueRef Val)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMPrintValueToString(LLVMValueRef Val)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMGetValueName2(LLVMValueRef Val, nativeint Length)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetValueName2(LLVMValueRef Val, [<MarshalAs(UnmanagedType.LPStr)>] string Name, uint32 NameLen)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMContextRef LLVMGetValueContext(LLVMValueRef Val)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMReplaceAllUsesWith(LLVMValueRef OldVal, LLVMValueRef NewVal)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMIsConstant(LLVMValueRef Val)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMIsUndef(LLVMValueRef Val)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMIsPoison(LLVMValueRef Val)
+// Value and Constant Functions
+type LLVMTypeOfDelegate = delegate of LLVMValueRef -> LLVMTypeRef
+type LLVMDumpValueDelegate = delegate of LLVMValueRef -> unit
+type LLVMPrintValueToStringDelegate = delegate of LLVMValueRef -> nativeint
+type LLVMGetValueName2Delegate = delegate of LLVMValueRef * nativeint -> nativeint
+type LLVMSetValueName2Delegate = delegate of LLVMValueRef * string * uint32 -> unit
+type LLVMGetValueContextDelegate = delegate of LLVMValueRef -> LLVMContextRef
+type LLVMReplaceAllUsesWithDelegate = delegate of LLVMValueRef * LLVMValueRef -> unit
+type LLVMIsConstantDelegate = delegate of LLVMValueRef -> LLVMBool
+type LLVMIsUndefDelegate = delegate of LLVMValueRef -> LLVMBool
+type LLVMIsPoisonDelegate = delegate of LLVMValueRef -> LLVMBool
 
 // Constants
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstNull(LLVMTypeRef Ty)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstAllOnes(LLVMTypeRef Ty)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetUndef(LLVMTypeRef Ty)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetPoison(LLVMTypeRef Ty)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMIsNull(LLVMValueRef Val)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstPointerNull(LLVMTypeRef Ty)
+type LLVMConstNullDelegate = delegate of LLVMTypeRef -> LLVMValueRef
+type LLVMConstAllOnesDelegate = delegate of LLVMTypeRef -> LLVMValueRef
+type LLVMGetUndefDelegate = delegate of LLVMTypeRef -> LLVMValueRef
+type LLVMGetPoisonDelegate = delegate of LLVMTypeRef -> LLVMValueRef
+type LLVMIsNullDelegate = delegate of LLVMValueRef -> LLVMBool
+type LLVMConstPointerNullDelegate = delegate of LLVMTypeRef -> LLVMValueRef
 
 // Scalar constants
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstInt(LLVMTypeRef IntTy, uint64 N, LLVMBool SignExtend)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstIntOfArbitraryPrecision(LLVMTypeRef IntTy, uint32 NumWords, nativeint Words)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstIntOfString(LLVMTypeRef IntTy, [<MarshalAs(UnmanagedType.LPStr)>] string Text, uint8 Radix)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstIntOfStringAndSize(LLVMTypeRef IntTy, [<MarshalAs(UnmanagedType.LPStr)>] string Text, uint32 SLen, uint8 Radix)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstReal(LLVMTypeRef RealTy, double N)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstRealOfString(LLVMTypeRef RealTy, [<MarshalAs(UnmanagedType.LPStr)>] string Text)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstRealOfStringAndSize(LLVMTypeRef RealTy, [<MarshalAs(UnmanagedType.LPStr)>] string Text, uint32 SLen)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint64 LLVMConstIntGetZExtValue(LLVMValueRef ConstantVal)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern int64 LLVMConstIntGetSExtValue(LLVMValueRef ConstantVal)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern double LLVMConstRealGetDouble(LLVMValueRef ConstantVal, nativeint LosesInfo)
+type LLVMConstIntDelegate = delegate of LLVMTypeRef * uint64 * LLVMBool -> LLVMValueRef
+type LLVMConstIntOfArbitraryPrecisionDelegate = delegate of LLVMTypeRef * uint32 * nativeint -> LLVMValueRef
+type LLVMConstIntOfStringDelegate = delegate of LLVMTypeRef * string * uint8 -> LLVMValueRef
+type LLVMConstIntOfStringAndSizeDelegate = delegate of LLVMTypeRef * string * uint32 * uint8 -> LLVMValueRef
+type LLVMConstRealDelegate = delegate of LLVMTypeRef * double -> LLVMValueRef
+type LLVMConstRealOfStringDelegate = delegate of LLVMTypeRef * string -> LLVMValueRef
+type LLVMConstRealOfStringAndSizeDelegate = delegate of LLVMTypeRef * string * uint32 -> LLVMValueRef
+type LLVMConstIntGetZExtValueDelegate = delegate of LLVMValueRef -> uint64
+type LLVMConstIntGetSExtValueDelegate = delegate of LLVMValueRef -> int64
+type LLVMConstRealGetDoubleDelegate = delegate of LLVMValueRef * nativeint -> double
 
 // Composite constants
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstStringInContext(LLVMContextRef C, [<MarshalAs(UnmanagedType.LPStr)>] string Str, uint32 Length, LLVMBool DontNullTerminate)
+type LLVMConstStringInContextDelegate = delegate of LLVMContextRef * string * uint32 * LLVMBool -> LLVMValueRef
+type LLVMConstStringInContext2Delegate = delegate of LLVMContextRef * string * uint32 * LLVMBool -> LLVMValueRef
+type LLVMConstStringDelegate = delegate of string * uint32 * LLVMBool -> LLVMValueRef
+type LLVMIsConstantStringDelegate = delegate of LLVMValueRef -> LLVMBool
+type LLVMGetAsStringDelegate = delegate of LLVMValueRef * nativeint -> nativeint
+type LLVMConstStructInContextDelegate = delegate of LLVMContextRef * nativeint * uint32 * LLVMBool -> LLVMValueRef
+type LLVMConstStructDelegate = delegate of nativeint * uint32 * LLVMBool -> LLVMValueRef
+type LLVMConstNamedStructDelegate = delegate of LLVMTypeRef * nativeint * uint32 -> LLVMValueRef
+type LLVMGetAggregateElementDelegate = delegate of LLVMValueRef * uint32 -> LLVMValueRef
+type LLVMConstArrayDelegate = delegate of LLVMTypeRef * nativeint * uint32 -> LLVMValueRef
+type LLVMConstArray2Delegate = delegate of LLVMTypeRef * nativeint * uint64 -> LLVMValueRef
+type LLVMConstVectorDelegate = delegate of nativeint * uint32 -> LLVMValueRef
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstStringInContext2(LLVMContextRef C, [<MarshalAs(UnmanagedType.LPStr)>] string Str, uint32 Length, LLVMBool DontNullTerminate)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstString([<MarshalAs(UnmanagedType.LPStr)>] string Str, uint32 Length, LLVMBool DontNullTerminate)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMIsConstantString(LLVMValueRef C)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMGetAsString(LLVMValueRef C, nativeint Length)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstStructInContext(LLVMContextRef C, nativeint ConstantVals, uint32 Count, LLVMBool Packed)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstStruct(nativeint ConstantVals, uint32 Count, LLVMBool Packed)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstNamedStruct(LLVMTypeRef StructTy, nativeint ConstantVals, uint32 Count)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetAggregateElement(LLVMValueRef C, uint32 Idx)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstArray(LLVMTypeRef ElementTy, nativeint ConstantVals, uint32 Length)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstArray2(LLVMTypeRef ElementTy, nativeint ConstantVals, uint64 Length)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstVector(nativeint ScalarConstantVals, uint32 Size)
-
-// Constant expressions
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMOpcode LLVMGetConstOpcode(LLVMValueRef ConstantVal)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMAlignOf(LLVMTypeRef Ty)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMSizeOf(LLVMTypeRef Ty)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstNeg(LLVMValueRef ConstantVal)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstNSWNeg(LLVMValueRef ConstantVal)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstNot(LLVMValueRef ConstantVal)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstAdd(LLVMValueRef LHSConstant, LLVMValueRef RHSConstant)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstNSWAdd(LLVMValueRef LHSConstant, LLVMValueRef RHSConstant)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstNUWAdd(LLVMValueRef LHSConstant, LLVMValueRef RHSConstant)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstSub(LLVMValueRef LHSConstant, LLVMValueRef RHSConstant)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstNSWSub(LLVMValueRef LHSConstant, LLVMValueRef RHSConstant)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstNUWSub(LLVMValueRef LHSConstant, LLVMValueRef RHSConstant)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstXor(LLVMValueRef LHSConstant, LLVMValueRef RHSConstant)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstGEP2(LLVMTypeRef Ty, LLVMValueRef ConstantVal, nativeint ConstantIndices, uint32 NumIndices)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstInBoundsGEP2(LLVMTypeRef Ty, LLVMValueRef ConstantVal, nativeint ConstantIndices, uint32 NumIndices)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstTrunc(LLVMValueRef ConstantVal, LLVMTypeRef ToType)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstPtrToInt(LLVMValueRef ConstantVal, LLVMTypeRef ToType)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstIntToPtr(LLVMValueRef ConstantVal, LLVMTypeRef ToType)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstBitCast(LLVMValueRef ConstantVal, LLVMTypeRef ToType)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstAddrSpaceCast(LLVMValueRef ConstantVal, LLVMTypeRef ToType)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstTruncOrBitCast(LLVMValueRef ConstantVal, LLVMTypeRef ToType)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstPointerCast(LLVMValueRef ConstantVal, LLVMTypeRef ToType)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstExtractElement(LLVMValueRef VectorConstant, LLVMValueRef IndexConstant)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstInsertElement(LLVMValueRef VectorConstant, LLVMValueRef ElementValueConstant, LLVMValueRef IndexConstant)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMConstShuffleVector(LLVMValueRef VectorAConstant, LLVMValueRef VectorBConstant, LLVMValueRef MaskConstant)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBlockAddress(LLVMValueRef F, LLVMBasicBlockRef BB)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetBlockAddressFunction(LLVMValueRef BlockAddr)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBasicBlockRef LLVMGetBlockAddressBasicBlock(LLVMValueRef BlockAddr)
-
-// =============================================================================
-// LLVM Global Values
-// =============================================================================
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMModuleRef LLVMGetGlobalParent(LLVMValueRef Global)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMIsDeclaration(LLVMValueRef Global)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMLinkage LLVMGetLinkage(LLVMValueRef Global)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetLinkage(LLVMValueRef Global, LLVMLinkage Linkage)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMGetSection(LLVMValueRef Global)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetSection(LLVMValueRef Global, [<MarshalAs(UnmanagedType.LPStr)>] string Section)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMVisibility LLVMGetVisibility(LLVMValueRef Global)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetVisibility(LLVMValueRef Global, LLVMVisibility Viz)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMGlobalGetValueType(LLVMValueRef Global)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMGetAlignment(LLVMValueRef V)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetAlignment(LLVMValueRef V, uint32 Bytes)
+// Global Values
+type LLVMGetGlobalParentDelegate = delegate of LLVMValueRef -> LLVMModuleRef
+type LLVMIsDeclarationDelegate = delegate of LLVMValueRef -> LLVMBool
+type LLVMGetLinkageDelegate = delegate of LLVMValueRef -> LLVMLinkage
+type LLVMSetLinkageDelegate = delegate of LLVMValueRef * LLVMLinkage -> unit
+type LLVMGetSectionDelegate = delegate of LLVMValueRef -> nativeint
+type LLVMSetSectionDelegate = delegate of LLVMValueRef * string -> unit
+type LLVMGetVisibilityDelegate = delegate of LLVMValueRef -> LLVMVisibility
+type LLVMSetVisibilityDelegate = delegate of LLVMValueRef * LLVMVisibility -> unit
+type LLVMGlobalGetValueTypeDelegate = delegate of LLVMValueRef -> LLVMTypeRef
+type LLVMGetAlignmentDelegate = delegate of LLVMValueRef -> uint32
+type LLVMSetAlignmentDelegate = delegate of LLVMValueRef * uint32 -> unit
 
 // Global variables
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMAddGlobal(LLVMModuleRef M, LLVMTypeRef Ty, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMAddGlobalInAddressSpace(LLVMModuleRef M, LLVMTypeRef Ty, [<MarshalAs(UnmanagedType.LPStr)>] string Name, uint32 AddressSpace)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetNamedGlobal(LLVMModuleRef M, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetFirstGlobal(LLVMModuleRef M)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetLastGlobal(LLVMModuleRef M)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetNextGlobal(LLVMValueRef GlobalVar)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetPreviousGlobal(LLVMValueRef GlobalVar)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMDeleteGlobal(LLVMValueRef GlobalVar)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetInitializer(LLVMValueRef GlobalVar)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetInitializer(LLVMValueRef GlobalVar, LLVMValueRef ConstantVal)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMIsThreadLocal(LLVMValueRef GlobalVar)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetThreadLocal(LLVMValueRef GlobalVar, LLVMBool IsThreadLocal)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMIsGlobalConstant(LLVMValueRef GlobalVar)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetGlobalConstant(LLVMValueRef GlobalVar, LLVMBool IsConstant)
+type LLVMAddGlobalDelegate = delegate of LLVMModuleRef * LLVMTypeRef * string -> LLVMValueRef
+type LLVMAddGlobalInAddressSpaceDelegate = delegate of LLVMModuleRef * LLVMTypeRef * string * uint32 -> LLVMValueRef
+type LLVMGetNamedGlobalDelegate = delegate of LLVMModuleRef * string -> LLVMValueRef
+type LLVMGetFirstGlobalDelegate = delegate of LLVMModuleRef -> LLVMValueRef
+type LLVMGetLastGlobalDelegate = delegate of LLVMModuleRef -> LLVMValueRef
+type LLVMGetNextGlobalDelegate = delegate of LLVMValueRef -> LLVMValueRef
+type LLVMGetPreviousGlobalDelegate = delegate of LLVMValueRef -> LLVMValueRef
+type LLVMDeleteGlobalDelegate = delegate of LLVMValueRef -> unit
+type LLVMGetInitializerDelegate = delegate of LLVMValueRef -> LLVMValueRef
+type LLVMSetInitializerDelegate = delegate of LLVMValueRef * LLVMValueRef -> unit
+type LLVMIsThreadLocalDelegate = delegate of LLVMValueRef -> LLVMBool
+type LLVMSetThreadLocalDelegate = delegate of LLVMValueRef * LLVMBool -> unit
+type LLVMIsGlobalConstantDelegate = delegate of LLVMValueRef -> LLVMBool
+type LLVMSetGlobalConstantDelegate = delegate of LLVMValueRef * LLVMBool -> unit
 
 // Functions
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMAddFunction(LLVMModuleRef M, [<MarshalAs(UnmanagedType.LPStr)>] string Name, LLVMTypeRef FunctionTy)
+type LLVMAddFunctionDelegate = delegate of LLVMModuleRef * string * LLVMTypeRef -> LLVMValueRef
+type LLVMGetNamedFunctionDelegate = delegate of LLVMModuleRef * string -> LLVMValueRef
+type LLVMGetFirstFunctionDelegate = delegate of LLVMModuleRef -> LLVMValueRef
+type LLVMGetLastFunctionDelegate = delegate of LLVMModuleRef -> LLVMValueRef
+type LLVMGetNextFunctionDelegate = delegate of LLVMValueRef -> LLVMValueRef
+type LLVMGetPreviousFunctionDelegate = delegate of LLVMValueRef -> LLVMValueRef
+type LLVMDeleteFunctionDelegate = delegate of LLVMValueRef -> unit
+type LLVMHasPersonalityFnDelegate = delegate of LLVMValueRef -> LLVMBool
+type LLVMGetPersonalityFnDelegate = delegate of LLVMValueRef -> LLVMValueRef
+type LLVMSetPersonalityFnDelegate = delegate of LLVMValueRef * LLVMValueRef -> unit
+type LLVMGetIntrinsicIDDelegate = delegate of LLVMValueRef -> uint32
+type LLVMGetFunctionCallConvDelegate = delegate of LLVMValueRef -> uint32
+type LLVMSetFunctionCallConvDelegate = delegate of LLVMValueRef * uint32 -> unit
+type LLVMGetGCDelegate = delegate of LLVMValueRef -> nativeint
+type LLVMSetGCDelegate = delegate of LLVMValueRef * string -> unit
+type LLVMCountParamsDelegate = delegate of LLVMValueRef -> uint32
+type LLVMGetParamsDelegate = delegate of LLVMValueRef * nativeint -> unit
+type LLVMGetParamDelegate = delegate of LLVMValueRef * uint32 -> LLVMValueRef
+type LLVMGetParamParentDelegate = delegate of LLVMValueRef -> LLVMValueRef
+type LLVMGetFirstParamDelegate = delegate of LLVMValueRef -> LLVMValueRef
+type LLVMGetLastParamDelegate = delegate of LLVMValueRef -> LLVMValueRef
+type LLVMGetNextParamDelegate = delegate of LLVMValueRef -> LLVMValueRef
+type LLVMGetPreviousParamDelegate = delegate of LLVMValueRef -> LLVMValueRef
+type LLVMSetParamAlignmentDelegate = delegate of LLVMValueRef * uint32 -> unit
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetNamedFunction(LLVMModuleRef M, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
+// Basic Block Functions
+type LLVMBasicBlockAsValueDelegate = delegate of LLVMBasicBlockRef -> LLVMValueRef
+type LLVMValueIsBasicBlockDelegate = delegate of LLVMValueRef -> LLVMBool
+type LLVMValueAsBasicBlockDelegate = delegate of LLVMValueRef -> LLVMBasicBlockRef
+type LLVMGetBasicBlockNameDelegate = delegate of LLVMBasicBlockRef -> nativeint
+type LLVMGetBasicBlockParentDelegate = delegate of LLVMBasicBlockRef -> LLVMValueRef
+type LLVMGetBasicBlockTerminatorDelegate = delegate of LLVMBasicBlockRef -> LLVMValueRef
+type LLVMCountBasicBlocksDelegate = delegate of LLVMValueRef -> uint32
+type LLVMGetBasicBlocksDelegate = delegate of LLVMValueRef * nativeint -> unit
+type LLVMGetFirstBasicBlockDelegate = delegate of LLVMValueRef -> LLVMBasicBlockRef
+type LLVMGetLastBasicBlockDelegate = delegate of LLVMValueRef -> LLVMBasicBlockRef
+type LLVMGetNextBasicBlockDelegate = delegate of LLVMBasicBlockRef -> LLVMBasicBlockRef
+type LLVMGetPreviousBasicBlockDelegate = delegate of LLVMBasicBlockRef -> LLVMBasicBlockRef
+type LLVMGetEntryBasicBlockDelegate = delegate of LLVMValueRef -> LLVMBasicBlockRef
+type LLVMInsertExistingBasicBlockAfterInsertBlockDelegate = delegate of LLVMBuilderRef * LLVMBasicBlockRef -> unit
+type LLVMAppendExistingBasicBlockDelegate = delegate of LLVMValueRef * LLVMBasicBlockRef -> unit
+type LLVMCreateBasicBlockInContextDelegate = delegate of LLVMContextRef * string -> LLVMBasicBlockRef
+type LLVMAppendBasicBlockInContextDelegate = delegate of LLVMContextRef * LLVMValueRef * string -> LLVMBasicBlockRef
+type LLVMAppendBasicBlockDelegate = delegate of LLVMValueRef * string -> LLVMBasicBlockRef
+type LLVMInsertBasicBlockInContextDelegate = delegate of LLVMContextRef * LLVMBasicBlockRef * string -> LLVMBasicBlockRef
+type LLVMInsertBasicBlockDelegate = delegate of LLVMBasicBlockRef * string -> LLVMBasicBlockRef
+type LLVMDeleteBasicBlockDelegate = delegate of LLVMBasicBlockRef -> unit
+type LLVMRemoveBasicBlockFromParentDelegate = delegate of LLVMBasicBlockRef -> unit
+type LLVMMoveBasicBlockBeforeDelegate = delegate of LLVMBasicBlockRef * LLVMBasicBlockRef -> unit
+type LLVMMoveBasicBlockAfterDelegate = delegate of LLVMBasicBlockRef * LLVMBasicBlockRef -> unit
+type LLVMGetFirstInstructionDelegate = delegate of LLVMBasicBlockRef -> LLVMValueRef
+type LLVMGetLastInstructionDelegate = delegate of LLVMBasicBlockRef -> LLVMValueRef
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetFirstFunction(LLVMModuleRef M)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetLastFunction(LLVMModuleRef M)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetNextFunction(LLVMValueRef Fn)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetPreviousFunction(LLVMValueRef Fn)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMDeleteFunction(LLVMValueRef Fn)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMHasPersonalityFn(LLVMValueRef Fn)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetPersonalityFn(LLVMValueRef Fn)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetPersonalityFn(LLVMValueRef Fn, LLVMValueRef PersonalityFn)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMGetIntrinsicID(LLVMValueRef Fn)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMGetFunctionCallConv(LLVMValueRef Fn)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetFunctionCallConv(LLVMValueRef Fn, uint32 CC)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMGetGC(LLVMValueRef Fn)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetGC(LLVMValueRef Fn, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMCountParams(LLVMValueRef Fn)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMGetParams(LLVMValueRef Fn, nativeint Params)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetParam(LLVMValueRef Fn, uint32 Index)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetParamParent(LLVMValueRef Inst)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetFirstParam(LLVMValueRef Fn)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetLastParam(LLVMValueRef Fn)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetNextParam(LLVMValueRef Arg)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetPreviousParam(LLVMValueRef Arg)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetParamAlignment(LLVMValueRef Arg, uint32 Align)
-
-// =============================================================================
-// LLVM Basic Block Functions
-// =============================================================================
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBasicBlockAsValue(LLVMBasicBlockRef BB)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMValueIsBasicBlock(LLVMValueRef Val)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBasicBlockRef LLVMValueAsBasicBlock(LLVMValueRef Val)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMGetBasicBlockName(LLVMBasicBlockRef BB)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetBasicBlockParent(LLVMBasicBlockRef BB)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetBasicBlockTerminator(LLVMBasicBlockRef BB)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMCountBasicBlocks(LLVMValueRef Fn)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMGetBasicBlocks(LLVMValueRef Fn, nativeint BasicBlocks)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBasicBlockRef LLVMGetFirstBasicBlock(LLVMValueRef Fn)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBasicBlockRef LLVMGetLastBasicBlock(LLVMValueRef Fn)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBasicBlockRef LLVMGetNextBasicBlock(LLVMBasicBlockRef BB)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBasicBlockRef LLVMGetPreviousBasicBlock(LLVMBasicBlockRef BB)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBasicBlockRef LLVMGetEntryBasicBlock(LLVMValueRef Fn)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMInsertExistingBasicBlockAfterInsertBlock(LLVMBuilderRef Builder, LLVMBasicBlockRef BB)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMAppendExistingBasicBlock(LLVMValueRef Fn, LLVMBasicBlockRef BB)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBasicBlockRef LLVMCreateBasicBlockInContext(LLVMContextRef C, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBasicBlockRef LLVMAppendBasicBlockInContext(LLVMContextRef C, LLVMValueRef Fn, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBasicBlockRef LLVMAppendBasicBlock(LLVMValueRef Fn, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBasicBlockRef LLVMInsertBasicBlockInContext(LLVMContextRef C, LLVMBasicBlockRef BB, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBasicBlockRef LLVMInsertBasicBlock(LLVMBasicBlockRef InsertBeforeBB, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMDeleteBasicBlock(LLVMBasicBlockRef BB)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMRemoveBasicBlockFromParent(LLVMBasicBlockRef BB)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMMoveBasicBlockBefore(LLVMBasicBlockRef BB, LLVMBasicBlockRef MovePos)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMMoveBasicBlockAfter(LLVMBasicBlockRef BB, LLVMBasicBlockRef MovePos)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetFirstInstruction(LLVMBasicBlockRef BB)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetLastInstruction(LLVMBasicBlockRef BB)
-
-// =============================================================================
-// LLVM Instruction Builder Functions
-// =============================================================================
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBuilderRef LLVMCreateBuilderInContext(LLVMContextRef C)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBuilderRef LLVMCreateBuilder()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMPositionBuilder(LLVMBuilderRef Builder, LLVMBasicBlockRef Block, LLVMValueRef Instr)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMPositionBuilderBefore(LLVMBuilderRef Builder, LLVMValueRef Instr)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMPositionBuilderAtEnd(LLVMBuilderRef Builder, LLVMBasicBlockRef Block)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBasicBlockRef LLVMGetInsertBlock(LLVMBuilderRef Builder)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMClearInsertionPosition(LLVMBuilderRef Builder)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMInsertIntoBuilder(LLVMBuilderRef Builder, LLVMValueRef Instr)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMInsertIntoBuilderWithName(LLVMBuilderRef Builder, LLVMValueRef Instr, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMDisposeBuilder(LLVMBuilderRef Builder)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMContextRef LLVMGetBuilderContext(LLVMBuilderRef Builder)
+// Instruction Builder Functions
+type LLVMCreateBuilderInContextDelegate = delegate of LLVMContextRef -> LLVMBuilderRef
+type LLVMCreateBuilderDelegate = delegate of unit -> LLVMBuilderRef
+type LLVMPositionBuilderDelegate = delegate of LLVMBuilderRef * LLVMBasicBlockRef * LLVMValueRef -> unit
+type LLVMPositionBuilderBeforeDelegate = delegate of LLVMBuilderRef * LLVMValueRef -> unit
+type LLVMPositionBuilderAtEndDelegate = delegate of LLVMBuilderRef * LLVMBasicBlockRef -> unit
+type LLVMGetInsertBlockDelegate = delegate of LLVMBuilderRef -> LLVMBasicBlockRef
+type LLVMClearInsertionPositionDelegate = delegate of LLVMBuilderRef -> unit
+type LLVMInsertIntoBuilderDelegate = delegate of LLVMBuilderRef * LLVMValueRef -> unit
+type LLVMInsertIntoBuilderWithNameDelegate = delegate of LLVMBuilderRef * LLVMValueRef * string -> unit
+type LLVMDisposeBuilderDelegate = delegate of LLVMBuilderRef -> unit
+type LLVMGetBuilderContextDelegate = delegate of LLVMBuilderRef -> LLVMContextRef
 
 // Metadata
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMMetadataRef LLVMGetCurrentDebugLocation2(LLVMBuilderRef Builder)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetCurrentDebugLocation2(LLVMBuilderRef Builder, LLVMMetadataRef Loc)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMAddMetadataToInst(LLVMBuilderRef Builder, LLVMValueRef Inst)
+type LLVMGetCurrentDebugLocation2Delegate = delegate of LLVMBuilderRef -> LLVMMetadataRef
+type LLVMSetCurrentDebugLocation2Delegate = delegate of LLVMBuilderRef * LLVMMetadataRef -> unit
+type LLVMAddMetadataToInstDelegate = delegate of LLVMBuilderRef * LLVMValueRef -> unit
 
 // Terminator Instructions
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildRetVoid(LLVMBuilderRef Builder)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildRet(LLVMBuilderRef Builder, LLVMValueRef V)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildAggregateRet(LLVMBuilderRef Builder, nativeint RetVals, uint32 N)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildBr(LLVMBuilderRef Builder, LLVMBasicBlockRef Dest)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildCondBr(LLVMBuilderRef Builder, LLVMValueRef If, LLVMBasicBlockRef Then, LLVMBasicBlockRef Else)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildSwitch(LLVMBuilderRef Builder, LLVMValueRef V, LLVMBasicBlockRef Else, uint32 NumCases)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildIndirectBr(LLVMBuilderRef B, LLVMValueRef Addr, uint32 NumDests)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildInvoke2(LLVMBuilderRef Builder, LLVMTypeRef Ty, LLVMValueRef Fn, nativeint Args, uint32 NumArgs, LLVMBasicBlockRef Then, LLVMBasicBlockRef Catch, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildUnreachable(LLVMBuilderRef Builder)
+type LLVMBuildRetVoidDelegate = delegate of LLVMBuilderRef -> LLVMValueRef
+type LLVMBuildRetDelegate = delegate of LLVMBuilderRef * LLVMValueRef -> LLVMValueRef
+type LLVMBuildAggregateRetDelegate = delegate of LLVMBuilderRef * nativeint * uint32 -> LLVMValueRef
+type LLVMBuildBrDelegate = delegate of LLVMBuilderRef * LLVMBasicBlockRef -> LLVMValueRef
+type LLVMBuildCondBrDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMBasicBlockRef * LLVMBasicBlockRef -> LLVMValueRef
+type LLVMBuildSwitchDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMBasicBlockRef * uint32 -> LLVMValueRef
+type LLVMBuildIndirectBrDelegate = delegate of LLVMBuilderRef * LLVMValueRef * uint32 -> LLVMValueRef
+type LLVMBuildInvoke2Delegate = delegate of LLVMBuilderRef * LLVMTypeRef * LLVMValueRef * nativeint * uint32 * LLVMBasicBlockRef * LLVMBasicBlockRef * string -> LLVMValueRef
+type LLVMBuildUnreachableDelegate = delegate of LLVMBuilderRef -> LLVMValueRef
 
 // Exception Handling
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildResume(LLVMBuilderRef B, LLVMValueRef Exn)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildLandingPad(LLVMBuilderRef B, LLVMTypeRef Ty, LLVMValueRef PersFn, uint32 NumClauses, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildCleanupRet(LLVMBuilderRef B, LLVMValueRef CatchPad, LLVMBasicBlockRef BB)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildCatchRet(LLVMBuilderRef B, LLVMValueRef CatchPad, LLVMBasicBlockRef BB)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildCatchPad(LLVMBuilderRef B, LLVMValueRef ParentPad, nativeint Args, uint32 NumArgs, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildCleanupPad(LLVMBuilderRef B, LLVMValueRef ParentPad, nativeint Args, uint32 NumArgs, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildCatchSwitch(LLVMBuilderRef B, LLVMValueRef ParentPad, LLVMBasicBlockRef UnwindBB, uint32 NumHandlers, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
+type LLVMBuildResumeDelegate = delegate of LLVMBuilderRef * LLVMValueRef -> LLVMValueRef
+type LLVMBuildLandingPadDelegate = delegate of LLVMBuilderRef * LLVMTypeRef * LLVMValueRef * uint32 * string -> LLVMValueRef
+type LLVMBuildCleanupRetDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMBasicBlockRef -> LLVMValueRef
+type LLVMBuildCatchRetDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMBasicBlockRef -> LLVMValueRef
+type LLVMBuildCatchPadDelegate = delegate of LLVMBuilderRef * LLVMValueRef * nativeint * uint32 * string -> LLVMValueRef
+type LLVMBuildCleanupPadDelegate = delegate of LLVMBuilderRef * LLVMValueRef * nativeint * uint32 * string -> LLVMValueRef
+type LLVMBuildCatchSwitchDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMBasicBlockRef * uint32 * string -> LLVMValueRef
 
 // Control flow helpers
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMAddCase(LLVMValueRef Switch, LLVMValueRef OnVal, LLVMBasicBlockRef Dest)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMAddDestination(LLVMValueRef IndirectBr, LLVMBasicBlockRef Dest)
+type LLVMAddCaseDelegate = delegate of LLVMValueRef * LLVMValueRef * LLVMBasicBlockRef -> unit
+type LLVMAddDestinationDelegate = delegate of LLVMValueRef * LLVMBasicBlockRef -> unit
 
 // Arithmetic Instructions
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildAdd(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildNSWAdd(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildNUWAdd(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildFAdd(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildSub(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildNSWSub(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildNUWSub(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildFSub(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildMul(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildNSWMul(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildNUWMul(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildFMul(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildUDiv(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildExactUDiv(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildSDiv(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildExactSDiv(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildFDiv(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildURem(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildSRem(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildFRem(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildShl(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildLShr(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildAShr(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildAnd(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildOr(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildXor(LLVMBuilderRef Builder, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildBinOp(LLVMBuilderRef B, LLVMOpcode Op, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildNeg(LLVMBuilderRef Builder, LLVMValueRef V, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildNSWNeg(LLVMBuilderRef B, LLVMValueRef V, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildFNeg(LLVMBuilderRef Builder, LLVMValueRef V, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildNot(LLVMBuilderRef Builder, LLVMValueRef V, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
+type LLVMBuildAddDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildNSWAddDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildNUWAddDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildFAddDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildSubDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildNSWSubDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildNUWSubDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildFSubDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildMulDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildNSWMulDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildNUWMulDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildFMulDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildUDivDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildExactUDivDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildSDivDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildExactSDivDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildFDivDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildURemDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildSRemDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildFRemDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildShlDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildLShrDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildAShrDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildAndDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildOrDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildXorDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildBinOpDelegate = delegate of LLVMBuilderRef * LLVMOpcode * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildNegDelegate = delegate of LLVMBuilderRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildNSWNegDelegate = delegate of LLVMBuilderRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildFNegDelegate = delegate of LLVMBuilderRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildNotDelegate = delegate of LLVMBuilderRef * LLVMValueRef * string -> LLVMValueRef
 
 // Arithmetic flags
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMGetNUW(LLVMValueRef ArithInst)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetNUW(LLVMValueRef ArithInst, LLVMBool HasNUW)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMGetNSW(LLVMValueRef ArithInst)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetNSW(LLVMValueRef ArithInst, LLVMBool HasNSW)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMGetExact(LLVMValueRef DivOrShrInst)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetExact(LLVMValueRef DivOrShrInst, LLVMBool IsExact)
+type LLVMGetNUWDelegate = delegate of LLVMValueRef -> LLVMBool
+type LLVMSetNUWDelegate = delegate of LLVMValueRef * LLVMBool -> unit
+type LLVMGetNSWDelegate = delegate of LLVMValueRef -> LLVMBool
+type LLVMSetNSWDelegate = delegate of LLVMValueRef * LLVMBool -> unit
+type LLVMGetExactDelegate = delegate of LLVMValueRef -> LLVMBool
+type LLVMSetExactDelegate = delegate of LLVMValueRef * LLVMBool -> unit
 
 // Memory Instructions
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildAlloca(LLVMBuilderRef Builder, LLVMTypeRef Ty, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildArrayAlloca(LLVMBuilderRef Builder, LLVMTypeRef Ty, LLVMValueRef Val, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildLoad2(LLVMBuilderRef Builder, LLVMTypeRef Ty, LLVMValueRef PointerVal, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildStore(LLVMBuilderRef Builder, LLVMValueRef Val, LLVMValueRef Ptr)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildGEP2(LLVMBuilderRef B, LLVMTypeRef Ty, LLVMValueRef Pointer, nativeint Indices, uint32 NumIndices, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildInBoundsGEP2(LLVMBuilderRef B, LLVMTypeRef Ty, LLVMValueRef Pointer, nativeint Indices, uint32 NumIndices, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildStructGEP2(LLVMBuilderRef B, LLVMTypeRef Ty, LLVMValueRef Pointer, uint32 Idx, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildGlobalString(LLVMBuilderRef B, [<MarshalAs(UnmanagedType.LPStr)>] string Str, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildGlobalStringPtr(LLVMBuilderRef B, [<MarshalAs(UnmanagedType.LPStr)>] string Str, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMGetVolatile(LLVMValueRef MemoryAccessInst)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetVolatile(LLVMValueRef MemoryAccessInst, LLVMBool IsVolatile)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMAtomicOrdering LLVMGetOrdering(LLVMValueRef MemoryAccessInst)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetOrdering(LLVMValueRef MemoryAccessInst, LLVMAtomicOrdering Ordering)
+type LLVMBuildAllocaDelegate = delegate of LLVMBuilderRef * LLVMTypeRef * string -> LLVMValueRef
+type LLVMBuildArrayAllocaDelegate = delegate of LLVMBuilderRef * LLVMTypeRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildLoad2Delegate = delegate of LLVMBuilderRef * LLVMTypeRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildStoreDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef -> LLVMValueRef
+type LLVMBuildGEP2Delegate = delegate of LLVMBuilderRef * LLVMTypeRef * LLVMValueRef * nativeint * uint32 * string -> LLVMValueRef
+type LLVMBuildInBoundsGEP2Delegate = delegate of LLVMBuilderRef * LLVMTypeRef * LLVMValueRef * nativeint * uint32 * string -> LLVMValueRef
+type LLVMBuildStructGEP2Delegate = delegate of LLVMBuilderRef * LLVMTypeRef * LLVMValueRef * uint32 * string -> LLVMValueRef
+type LLVMBuildGlobalStringDelegate = delegate of LLVMBuilderRef * string * string -> LLVMValueRef
+type LLVMBuildGlobalStringPtrDelegate = delegate of LLVMBuilderRef * string * string -> LLVMValueRef
+type LLVMGetVolatileDelegate = delegate of LLVMValueRef -> LLVMBool
+type LLVMSetVolatileDelegate = delegate of LLVMValueRef * LLVMBool -> unit
+type LLVMGetOrderingDelegate = delegate of LLVMValueRef -> LLVMAtomicOrdering
+type LLVMSetOrderingDelegate = delegate of LLVMValueRef * LLVMAtomicOrdering -> unit
 
 // Cast Instructions
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildTrunc(LLVMBuilderRef Builder, LLVMValueRef Val, LLVMTypeRef DestTy, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildZExt(LLVMBuilderRef Builder, LLVMValueRef Val, LLVMTypeRef DestTy, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildSExt(LLVMBuilderRef Builder, LLVMValueRef Val, LLVMTypeRef DestTy, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildFPToUI(LLVMBuilderRef Builder, LLVMValueRef Val, LLVMTypeRef DestTy, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildFPToSI(LLVMBuilderRef Builder, LLVMValueRef Val, LLVMTypeRef DestTy, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]  
-extern LLVMValueRef LLVMBuildUIToFP(LLVMBuilderRef Builder, LLVMValueRef Val, LLVMTypeRef DestTy, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildSIToFP(LLVMBuilderRef Builder, LLVMValueRef Val, LLVMTypeRef DestTy, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildFPTrunc(LLVMBuilderRef Builder, LLVMValueRef Val, LLVMTypeRef DestTy, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildFPExt(LLVMBuilderRef Builder, LLVMValueRef Val, LLVMTypeRef DestTy, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildPtrToInt(LLVMBuilderRef Builder, LLVMValueRef Val, LLVMTypeRef DestTy, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildIntToPtr(LLVMBuilderRef Builder, LLVMValueRef Val, LLVMTypeRef DestTy, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildBitCast(LLVMBuilderRef Builder, LLVMValueRef Val, LLVMTypeRef DestTy, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildAddrSpaceCast(LLVMBuilderRef Builder, LLVMValueRef Val, LLVMTypeRef DestTy, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildPointerCast(LLVMBuilderRef Builder, LLVMValueRef Val, LLVMTypeRef DestTy, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildIntCast2(LLVMBuilderRef Builder, LLVMValueRef Val, LLVMTypeRef DestTy, LLVMBool IsSigned, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildFPCast(LLVMBuilderRef Builder, LLVMValueRef Val, LLVMTypeRef DestTy, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildCast(LLVMBuilderRef B, LLVMOpcode Op, LLVMValueRef Val, LLVMTypeRef DestTy, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMOpcode LLVMGetCastOpcode(LLVMValueRef Src, LLVMBool SrcIsSigned, LLVMTypeRef DestTy, LLVMBool DestIsSigned)
+type LLVMBuildTruncDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMTypeRef * string -> LLVMValueRef
+type LLVMBuildZExtDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMTypeRef * string -> LLVMValueRef
+type LLVMBuildSExtDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMTypeRef * string -> LLVMValueRef
+type LLVMBuildFPToUIDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMTypeRef * string -> LLVMValueRef
+type LLVMBuildFPToSIDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMTypeRef * string -> LLVMValueRef
+type LLVMBuildUIToFPDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMTypeRef * string -> LLVMValueRef
+type LLVMBuildSIToFPDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMTypeRef * string -> LLVMValueRef
+type LLVMBuildFPTruncDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMTypeRef * string -> LLVMValueRef
+type LLVMBuildFPExtDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMTypeRef * string -> LLVMValueRef
+type LLVMBuildPtrToIntDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMTypeRef * string -> LLVMValueRef
+type LLVMBuildIntToPtrDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMTypeRef * string -> LLVMValueRef
+type LLVMBuildBitCastDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMTypeRef * string -> LLVMValueRef
+type LLVMBuildAddrSpaceCastDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMTypeRef * string -> LLVMValueRef
+type LLVMBuildPointerCastDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMTypeRef * string -> LLVMValueRef
+type LLVMBuildIntCast2Delegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMTypeRef * LLVMBool * string -> LLVMValueRef
+type LLVMBuildFPCastDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMTypeRef * string -> LLVMValueRef
+type LLVMBuildCastDelegate = delegate of LLVMBuilderRef * LLVMOpcode * LLVMValueRef * LLVMTypeRef * string -> LLVMValueRef
+type LLVMGetCastOpcodeDelegate = delegate of LLVMValueRef * LLVMBool * LLVMTypeRef * LLVMBool -> LLVMOpcode
 
 // Comparison Instructions
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildICmp(LLVMBuilderRef Builder, LLVMIntPredicate Op, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildFCmp(LLVMBuilderRef Builder, LLVMRealPredicate Op, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
+type LLVMBuildICmpDelegate = delegate of LLVMBuilderRef * LLVMIntPredicate * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildFCmpDelegate = delegate of LLVMBuilderRef * LLVMRealPredicate * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
 
 // Other Instructions
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildPhi(LLVMBuilderRef Builder, LLVMTypeRef Ty, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildCall2(LLVMBuilderRef Builder, LLVMTypeRef Ty, LLVMValueRef Fn, nativeint Args, uint32 NumArgs, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildSelect(LLVMBuilderRef Builder, LLVMValueRef If, LLVMValueRef Then, LLVMValueRef Else, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildVAArg(LLVMBuilderRef Builder, LLVMValueRef List, LLVMTypeRef Ty, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildExtractElement(LLVMBuilderRef Builder, LLVMValueRef VecVal, LLVMValueRef Index, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildInsertElement(LLVMBuilderRef Builder, LLVMValueRef VecVal, LLVMValueRef EltVal, LLVMValueRef Index, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildShuffleVector(LLVMBuilderRef Builder, LLVMValueRef V1, LLVMValueRef V2, LLVMValueRef Mask, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildExtractValue(LLVMBuilderRef Builder, LLVMValueRef AggVal, uint32 Index, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildInsertValue(LLVMBuilderRef Builder, LLVMValueRef AggVal, LLVMValueRef EltVal, uint32 Index, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildFreeze(LLVMBuilderRef Builder, LLVMValueRef Val, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildIsNull(LLVMBuilderRef Builder, LLVMValueRef Val, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildIsNotNull(LLVMBuilderRef Builder, LLVMValueRef Val, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildPtrDiff2(LLVMBuilderRef Builder, LLVMTypeRef ElemTy, LLVMValueRef LHS, LLVMValueRef RHS, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildFence(LLVMBuilderRef B, LLVMAtomicOrdering ordering, LLVMBool singleThread, [<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildAtomicRMW(LLVMBuilderRef B, LLVMAtomicRMWBinOp op, LLVMValueRef PTR, LLVMValueRef Val, LLVMAtomicOrdering ordering, LLVMBool singleThread)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMBuildAtomicCmpXchg(LLVMBuilderRef B, LLVMValueRef Ptr, LLVMValueRef Cmp, LLVMValueRef New, LLVMAtomicOrdering SuccessOrdering, LLVMAtomicOrdering FailureOrdering, LLVMBool SingleThread)
+type LLVMBuildPhiDelegate = delegate of LLVMBuilderRef * LLVMTypeRef * string -> LLVMValueRef
+type LLVMBuildCall2Delegate = delegate of LLVMBuilderRef * LLVMTypeRef * LLVMValueRef * nativeint * uint32 * string -> LLVMValueRef
+type LLVMBuildSelectDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildVAArgDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMTypeRef * string -> LLVMValueRef
+type LLVMBuildExtractElementDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildInsertElementDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildShuffleVectorDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildExtractValueDelegate = delegate of LLVMBuilderRef * LLVMValueRef * uint32 * string -> LLVMValueRef
+type LLVMBuildInsertValueDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * uint32 * string -> LLVMValueRef
+type LLVMBuildFreezeDelegate = delegate of LLVMBuilderRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildIsNullDelegate = delegate of LLVMBuilderRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildIsNotNullDelegate = delegate of LLVMBuilderRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildPtrDiff2Delegate = delegate of LLVMBuilderRef * LLVMTypeRef * LLVMValueRef * LLVMValueRef * string -> LLVMValueRef
+type LLVMBuildFenceDelegate = delegate of LLVMBuilderRef * LLVMAtomicOrdering * LLVMBool * string -> LLVMValueRef
+type LLVMBuildAtomicRMWDelegate = delegate of LLVMBuilderRef * LLVMAtomicRMWBinOp * LLVMValueRef * LLVMValueRef * LLVMAtomicOrdering * LLVMBool -> LLVMValueRef
+type LLVMBuildAtomicCmpXchgDelegate = delegate of LLVMBuilderRef * LLVMValueRef * LLVMValueRef * LLVMValueRef * LLVMAtomicOrdering * LLVMAtomicOrdering * LLVMBool -> LLVMValueRef
 
 // Atomic helpers
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMIsAtomicSingleThread(LLVMValueRef AtomicInst)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetAtomicSingleThread(LLVMValueRef AtomicInst, LLVMBool SingleThread)
+type LLVMIsAtomicSingleThreadDelegate = delegate of LLVMValueRef -> LLVMBool
+type LLVMSetAtomicSingleThreadDelegate = delegate of LLVMValueRef * LLVMBool -> unit
 
 // PHI Node Functions
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMAddIncoming(LLVMValueRef PhiNode, nativeint IncomingValues, nativeint IncomingBlocks, uint32 Count)
+type LLVMAddIncomingDelegate = delegate of LLVMValueRef * nativeint * nativeint * uint32 -> unit
+type LLVMCountIncomingDelegate = delegate of LLVMValueRef -> uint32
+type LLVMGetIncomingValueDelegate = delegate of LLVMValueRef * uint32 -> LLVMValueRef
+type LLVMGetIncomingBlockDelegate = delegate of LLVMValueRef * uint32 -> LLVMBasicBlockRef
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMCountIncoming(LLVMValueRef PhiNode)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetIncomingValue(LLVMValueRef PhiNode, uint32 Index)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBasicBlockRef LLVMGetIncomingBlock(LLVMValueRef PhiNode, uint32 Index)
-
-// =============================================================================
-// LLVM Instruction Functions
-// =============================================================================
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern int LLVMHasMetadata(LLVMValueRef Val)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetMetadata(LLVMValueRef Val, uint32 KindID)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetMetadata(LLVMValueRef Val, uint32 KindID, LLVMValueRef Node)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBasicBlockRef LLVMGetInstructionParent(LLVMValueRef Inst)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetNextInstruction(LLVMValueRef Inst)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetPreviousInstruction(LLVMValueRef Inst)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMInstructionRemoveFromParent(LLVMValueRef Inst)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMInstructionEraseFromParent(LLVMValueRef Inst)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMDeleteInstruction(LLVMValueRef Inst)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMOpcode LLVMGetInstructionOpcode(LLVMValueRef Inst)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMIntPredicate LLVMGetICmpPredicate(LLVMValueRef Inst)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMRealPredicate LLVMGetFCmpPredicate(LLVMValueRef Inst)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMInstructionClone(LLVMValueRef Inst)
+// Instruction Functions
+type LLVMHasMetadataDelegate = delegate of LLVMValueRef -> int
+type LLVMGetMetadataDelegate = delegate of LLVMValueRef * uint32 -> LLVMValueRef
+type LLVMSetMetadataDelegate = delegate of LLVMValueRef * uint32 * LLVMValueRef -> unit
+type LLVMGetInstructionParentDelegate = delegate of LLVMValueRef -> LLVMBasicBlockRef
+type LLVMGetNextInstructionDelegate = delegate of LLVMValueRef -> LLVMValueRef
+type LLVMGetPreviousInstructionDelegate = delegate of LLVMValueRef -> LLVMValueRef
+type LLVMInstructionRemoveFromParentDelegate = delegate of LLVMValueRef -> unit
+type LLVMInstructionEraseFromParentDelegate = delegate of LLVMValueRef -> unit
+type LLVMDeleteInstructionDelegate = delegate of LLVMValueRef -> unit
+type LLVMGetInstructionOpcodeDelegate = delegate of LLVMValueRef -> LLVMOpcode
+type LLVMGetICmpPredicateDelegate = delegate of LLVMValueRef -> LLVMIntPredicate
+type LLVMGetFCmpPredicateDelegate = delegate of LLVMValueRef -> LLVMRealPredicate
+type LLVMInstructionCloneDelegate = delegate of LLVMValueRef -> LLVMValueRef
 
 // Call site functions
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMGetNumArgOperands(LLVMValueRef Instr)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetInstructionCallConv(LLVMValueRef Instr, uint32 CC)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMGetInstructionCallConv(LLVMValueRef Instr)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMGetCalledFunctionType(LLVMValueRef C)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetCalledValue(LLVMValueRef Instr)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMIsTailCall(LLVMValueRef CallInst)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetTailCall(LLVMValueRef CallInst, LLVMBool IsTailCall)
+type LLVMGetNumArgOperandsDelegate = delegate of LLVMValueRef -> uint32
+type LLVMSetInstructionCallConvDelegate = delegate of LLVMValueRef * uint32 -> unit
+type LLVMGetInstructionCallConvDelegate = delegate of LLVMValueRef -> uint32
+type LLVMGetCalledFunctionTypeDelegate = delegate of LLVMValueRef -> LLVMTypeRef
+type LLVMGetCalledValueDelegate = delegate of LLVMValueRef -> LLVMValueRef
+type LLVMIsTailCallDelegate = delegate of LLVMValueRef -> LLVMBool
+type LLVMSetTailCallDelegate = delegate of LLVMValueRef * LLVMBool -> unit
 
 // Terminator functions
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMGetNumSuccessors(LLVMValueRef Term)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBasicBlockRef LLVMGetSuccessor(LLVMValueRef Term, uint32 i)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetSuccessor(LLVMValueRef Term, uint32 i, LLVMBasicBlockRef block)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMIsConditional(LLVMValueRef Branch)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMValueRef LLVMGetCondition(LLVMValueRef Branch)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetCondition(LLVMValueRef Branch, LLVMValueRef Cond)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBasicBlockRef LLVMGetSwitchDefaultDest(LLVMValueRef SwitchInstr)
+type LLVMGetNumSuccessorsDelegate = delegate of LLVMValueRef -> uint32
+type LLVMGetSuccessorDelegate = delegate of LLVMValueRef * uint32 -> LLVMBasicBlockRef
+type LLVMSetSuccessorDelegate = delegate of LLVMValueRef * uint32 * LLVMBasicBlockRef -> unit
+type LLVMIsConditionalDelegate = delegate of LLVMValueRef -> LLVMBool
+type LLVMGetConditionDelegate = delegate of LLVMValueRef -> LLVMValueRef
+type LLVMSetConditionDelegate = delegate of LLVMValueRef * LLVMValueRef -> unit
+type LLVMGetSwitchDefaultDestDelegate = delegate of LLVMValueRef -> LLVMBasicBlockRef
 
 // Alloca functions
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMGetAllocatedType(LLVMValueRef Alloca)
+type LLVMGetAllocatedTypeDelegate = delegate of LLVMValueRef -> LLVMTypeRef
 
 // GEP functions
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMIsInBounds(LLVMValueRef GEP)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetIsInBounds(LLVMValueRef GEP, LLVMBool InBounds)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMGetGEPSourceElementType(LLVMValueRef GEP)
+type LLVMIsInBoundsDelegate = delegate of LLVMValueRef -> LLVMBool
+type LLVMSetIsInBoundsDelegate = delegate of LLVMValueRef * LLVMBool -> unit
+type LLVMGetGEPSourceElementTypeDelegate = delegate of LLVMValueRef -> LLVMTypeRef
 
 // Extract/Insert value functions
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMGetNumIndices(LLVMValueRef Inst)
+type LLVMGetNumIndicesDelegate = delegate of LLVMValueRef -> uint32
+type LLVMGetIndicesDelegate = delegate of LLVMValueRef -> nativeint
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMGetIndices(LLVMValueRef Inst)
-
-// =============================================================================
-// LLVM Pass Manager Functions
-// =============================================================================
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMPassManagerRef LLVMCreatePassManager()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMPassManagerRef LLVMCreateFunctionPassManagerForModule(LLVMModuleRef M)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMRunPassManager(LLVMPassManagerRef PM, LLVMModuleRef M)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMInitializeFunctionPassManager(LLVMPassManagerRef FPM)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMRunFunctionPassManager(LLVMPassManagerRef FPM, LLVMValueRef F)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMFinalizeFunctionPassManager(LLVMPassManagerRef FPM)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMDisposePassManager(LLVMPassManagerRef PM)
+// Pass Manager Functions
+type LLVMCreatePassManagerDelegate = delegate of unit -> LLVMPassManagerRef
+type LLVMCreateFunctionPassManagerForModuleDelegate = delegate of LLVMModuleRef -> LLVMPassManagerRef
+type LLVMRunPassManagerDelegate = delegate of LLVMPassManagerRef * LLVMModuleRef -> LLVMBool
+type LLVMInitializeFunctionPassManagerDelegate = delegate of LLVMPassManagerRef -> LLVMBool
+type LLVMRunFunctionPassManagerDelegate = delegate of LLVMPassManagerRef * LLVMValueRef -> LLVMBool
+type LLVMFinalizeFunctionPassManagerDelegate = delegate of LLVMPassManagerRef -> LLVMBool
+type LLVMDisposePassManagerDelegate = delegate of LLVMPassManagerRef -> unit
 
 // Optimization Passes
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMAddInstructionCombiningPass(LLVMPassManagerRef PM)
+type LLVMAddInstructionCombiningPassDelegate = delegate of LLVMPassManagerRef -> unit
+type LLVMAddPromoteMemoryToRegisterPassDelegate = delegate of LLVMPassManagerRef -> unit
+type LLVMAddGVNPassDelegate = delegate of LLVMPassManagerRef -> unit
+type LLVMAddCFGSimplificationPassDelegate = delegate of LLVMPassManagerRef -> unit
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMAddPromoteMemoryToRegisterPass(LLVMPassManagerRef PM)
+// Target Functions
+type LLVMGetDefaultTargetTripleDelegate = delegate of unit -> nativeint
+type LLVMGetHostCPUNameDelegate = delegate of unit -> nativeint
+type LLVMGetHostCPUFeaturesDelegate = delegate of unit -> nativeint
+type LLVMInitializeNativeTargetDelegate = delegate of unit -> LLVMBool
+type LLVMInitializeNativeAsmPrinterDelegate = delegate of unit -> LLVMBool
+type LLVMGetTargetFromTripleDelegate = delegate of string * nativeint * nativeint -> LLVMBool
+type LLVMGetTargetFromNameDelegate = delegate of string -> LLVMTargetRef
+type LLVMGetTargetNameDelegate = delegate of LLVMTargetRef -> nativeint
+type LLVMGetTargetDescriptionDelegate = delegate of LLVMTargetRef -> nativeint
+type LLVMTargetHasJITDelegate = delegate of LLVMTargetRef -> LLVMBool
+type LLVMTargetHasTargetMachineDelegate = delegate of LLVMTargetRef -> LLVMBool
+type LLVMTargetHasAsmBackendDelegate = delegate of LLVMTargetRef -> LLVMBool
+type LLVMCreateTargetMachineDelegate = delegate of LLVMTargetRef * string * string * string * LLVMCodeGenOptLevel * LLVMRelocMode * LLVMCodeModel -> LLVMTargetMachineRef
+type LLVMDisposeTargetMachineDelegate = delegate of LLVMTargetMachineRef -> unit
+type LLVMGetTargetMachineTargetDelegate = delegate of LLVMTargetMachineRef -> LLVMTargetRef
+type LLVMGetTargetMachineTripleDelegate = delegate of LLVMTargetMachineRef -> nativeint
+type LLVMGetTargetMachineCPUDelegate = delegate of LLVMTargetMachineRef -> nativeint
+type LLVMGetTargetMachineFeatureStringDelegate = delegate of LLVMTargetMachineRef -> nativeint
+type LLVMCreateTargetDataLayoutDelegate = delegate of LLVMTargetMachineRef -> LLVMTargetDataRef
+type LLVMTargetMachineEmitToFileDelegate = delegate of LLVMTargetMachineRef * LLVMModuleRef * string * LLVMCodeGenFileType * nativeint -> LLVMBool
+type LLVMTargetMachineEmitToMemoryBufferDelegate = delegate of LLVMTargetMachineRef * LLVMModuleRef * LLVMCodeGenFileType * nativeint * nativeint -> LLVMBool
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMAddGVNPass(LLVMPassManagerRef PM)
+// Target Data Functions
+type LLVMGetModuleDataLayoutDelegate = delegate of LLVMModuleRef -> LLVMTargetDataRef
+type LLVMSetModuleDataLayoutDelegate = delegate of LLVMModuleRef * LLVMTargetDataRef -> unit
+type LLVMCreateTargetDataDelegate = delegate of string -> LLVMTargetDataRef
+type LLVMDisposeTargetDataDelegate = delegate of LLVMTargetDataRef -> unit
+type LLVMCopyStringRepOfTargetDataDelegate = delegate of LLVMTargetDataRef -> nativeint
+type LLVMPointerSizeDelegate = delegate of LLVMTargetDataRef -> uint32
+type LLVMPointerSizeForASDelegate = delegate of LLVMTargetDataRef * uint32 -> uint32
+type LLVMIntPtrTypeDelegate = delegate of LLVMTargetDataRef -> LLVMTypeRef
+type LLVMIntPtrTypeForASDelegate = delegate of LLVMTargetDataRef * uint32 -> LLVMTypeRef
+type LLVMIntPtrTypeInContextDelegate = delegate of LLVMContextRef * LLVMTargetDataRef -> LLVMTypeRef
+type LLVMIntPtrTypeForASInContextDelegate = delegate of LLVMContextRef * LLVMTargetDataRef * uint32 -> LLVMTypeRef
+type LLVMSizeOfTypeInBitsDelegate = delegate of LLVMTargetDataRef * LLVMTypeRef -> uint64
+type LLVMStoreSizeOfTypeDelegate = delegate of LLVMTargetDataRef * LLVMTypeRef -> uint64
+type LLVMABISizeOfTypeDelegate = delegate of LLVMTargetDataRef * LLVMTypeRef -> uint64
+type LLVMABIAlignmentOfTypeDelegate = delegate of LLVMTargetDataRef * LLVMTypeRef -> uint32
+type LLVMCallFrameAlignmentOfTypeDelegate = delegate of LLVMTargetDataRef * LLVMTypeRef -> uint32
+type LLVMPreferredAlignmentOfTypeDelegate = delegate of LLVMTargetDataRef * LLVMTypeRef -> uint32
+type LLVMPreferredAlignmentOfGlobalDelegate = delegate of LLVMTargetDataRef * LLVMValueRef -> uint32
+type LLVMElementAtOffsetDelegate = delegate of LLVMTargetDataRef * LLVMTypeRef * uint64 -> uint32
+type LLVMOffsetOfElementDelegate = delegate of LLVMTargetDataRef * LLVMTypeRef * uint32 -> uint64
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMAddCFGSimplificationPass(LLVMPassManagerRef PM)
+// Initialization Functions
+type LLVMInitializeAllTargetInfosDelegate = delegate of unit -> unit
+type LLVMInitializeAllTargetsDelegate = delegate of unit -> unit
+type LLVMInitializeAllTargetMCsDelegate = delegate of unit -> unit
+type LLVMInitializeAllAsmPrintersDelegate = delegate of unit -> unit
+type LLVMInitializeAllAsmParsersDelegate = delegate of unit -> unit
+type LLVMInitializeAllDisassemblersDelegate = delegate of unit -> unit
 
-// =============================================================================
-// LLVM Target Functions
-// =============================================================================
+// Memory Management Functions
+type LLVMDisposeMessageDelegate = delegate of nativeint -> unit
+type LLVMShutdownDelegate = delegate of unit -> unit
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMGetDefaultTargetTriple()
+// Version Functions
+type LLVMGetVersionDelegate = delegate of nativeint * nativeint * nativeint -> unit
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMGetHostCPUName()
+// Error Handling
+type LLVMCreateMessageDelegate = delegate of string -> nativeint
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMGetHostCPUFeatures()
+// New Pass Manager Functions (PassBuilder)
+type LLVMRunPassesDelegate = delegate of LLVMModuleRef * string * LLVMTargetMachineRef * LLVMPassBuilderOptionsRef -> LLVMErrorRef
+type LLVMRunPassesOnFunctionDelegate = delegate of LLVMValueRef * string * LLVMTargetMachineRef * LLVMPassBuilderOptionsRef -> LLVMErrorRef
+type LLVMCreatePassBuilderOptionsDelegate = delegate of unit -> LLVMPassBuilderOptionsRef
+type LLVMPassBuilderOptionsSetVerifyEachDelegate = delegate of LLVMPassBuilderOptionsRef * LLVMBool -> unit
+type LLVMPassBuilderOptionsSetDebugLoggingDelegate = delegate of LLVMPassBuilderOptionsRef * LLVMBool -> unit
+type LLVMDisposePassBuilderOptionsDelegate = delegate of LLVMPassBuilderOptionsRef -> unit
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMInitializeNativeTarget()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMInitializeNativeAsmPrinter()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMGetTargetFromTriple([<MarshalAs(UnmanagedType.LPStr)>] string Triple, nativeint T, nativeint ErrorMessage)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTargetRef LLVMGetTargetFromName([<MarshalAs(UnmanagedType.LPStr)>] string Name)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMGetTargetName(LLVMTargetRef T)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMGetTargetDescription(LLVMTargetRef T)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMTargetHasJIT(LLVMTargetRef T)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMTargetHasTargetMachine(LLVMTargetRef T)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMTargetHasAsmBackend(LLVMTargetRef T)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTargetMachineRef LLVMCreateTargetMachine(
-    LLVMTargetRef T,
-    [<MarshalAs(UnmanagedType.LPStr)>] string Triple,
-    [<MarshalAs(UnmanagedType.LPStr)>] string CPU,
-    [<MarshalAs(UnmanagedType.LPStr)>] string Features,
-    LLVMCodeGenOptLevel Level,
-    LLVMRelocMode Reloc,
-    LLVMCodeModel CodeModel)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMDisposeTargetMachine(LLVMTargetMachineRef T)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTargetRef LLVMGetTargetMachineTarget(LLVMTargetMachineRef T)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMGetTargetMachineTriple(LLVMTargetMachineRef T)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMGetTargetMachineCPU(LLVMTargetMachineRef T)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMGetTargetMachineFeatureString(LLVMTargetMachineRef T)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTargetDataRef LLVMCreateTargetDataLayout(LLVMTargetMachineRef T)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMTargetMachineEmitToFile(
-    LLVMTargetMachineRef T,
-    LLVMModuleRef M,
-    [<MarshalAs(UnmanagedType.LPStr)>] string Filename,
-    LLVMCodeGenFileType Codegen,
-    nativeint ErrorMessage)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMTargetMachineEmitToMemoryBuffer(LLVMTargetMachineRef T, LLVMModuleRef M, LLVMCodeGenFileType codegen, nativeint ErrorMessage, nativeint OutMemBuf)
+// Memory Buffer Functions
+type LLVMCreateMemoryBufferWithContentsOfFileDelegate = delegate of string * nativeint * nativeint -> LLVMBool
+type LLVMCreateMemoryBufferWithSTDINDelegate = delegate of nativeint * nativeint -> LLVMBool
+type LLVMCreateMemoryBufferWithMemoryRangeDelegate = delegate of string * uint32 * string * LLVMBool -> LLVMMemoryBufferRef
+type LLVMCreateMemoryBufferWithMemoryRangeCopyDelegate = delegate of string * uint32 * string -> LLVMMemoryBufferRef
+type LLVMGetBufferStartDelegate = delegate of LLVMMemoryBufferRef -> nativeint
+type LLVMGetBufferSizeDelegate = delegate of LLVMMemoryBufferRef -> uint32
+type LLVMDisposeMemoryBufferDelegate = delegate of LLVMMemoryBufferRef -> unit
 
 // =============================================================================
-// LLVM Target Data Functions
+// Lazy-loaded Function Instances
 // =============================================================================
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTargetDataRef LLVMGetModuleDataLayout(LLVMModuleRef M)
+// Context Functions
+let llvmContextCreate = lazy (NativeLibrary.getFunction<LLVMContextCreateDelegate> "LLVMContextCreate")
+let llvmGetGlobalContext = lazy (NativeLibrary.getFunction<LLVMGetGlobalContextDelegate> "LLVMGetGlobalContext")
+let llvmContextDispose = lazy (NativeLibrary.getFunction<LLVMContextDisposeDelegate> "LLVMContextDispose")
+let llvmContextSetDiscardValueNames = lazy (NativeLibrary.getFunction<LLVMContextSetDiscardValueNamesDelegate> "LLVMContextSetDiscardValueNames")
+let llvmContextShouldDiscardValueNames = lazy (NativeLibrary.getFunction<LLVMContextShouldDiscardValueNamesDelegate> "LLVMContextShouldDiscardValueNames")
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMSetModuleDataLayout(LLVMModuleRef M, LLVMTargetDataRef DL)
+// Module Functions
+let llvmModuleCreateWithName = lazy (NativeLibrary.getFunction<LLVMModuleCreateWithNameDelegate> "LLVMModuleCreateWithName")
+let llvmModuleCreateWithNameInContext = lazy (NativeLibrary.getFunction<LLVMModuleCreateWithNameInContextDelegate> "LLVMModuleCreateWithNameInContext")
+let llvmCloneModule = lazy (NativeLibrary.getFunction<LLVMCloneModuleDelegate> "LLVMCloneModule")
+let llvmDisposeModule = lazy (NativeLibrary.getFunction<LLVMDisposeModuleDelegate> "LLVMDisposeModule")
+let llvmGetModuleIdentifier = lazy (NativeLibrary.getFunction<LLVMGetModuleIdentifierDelegate> "LLVMGetModuleIdentifier")
+let llvmSetModuleIdentifier = lazy (NativeLibrary.getFunction<LLVMSetModuleIdentifierDelegate> "LLVMSetModuleIdentifier")
+let llvmGetSourceFileName = lazy (NativeLibrary.getFunction<LLVMGetSourceFileNameDelegate> "LLVMGetSourceFileName")
+let llvmSetSourceFileName = lazy (NativeLibrary.getFunction<LLVMSetSourceFileNameDelegate> "LLVMSetSourceFileName")
+let llvmGetDataLayoutStr = lazy (NativeLibrary.getFunction<LLVMGetDataLayoutStrDelegate> "LLVMGetDataLayoutStr")
+let llvmSetDataLayout = lazy (NativeLibrary.getFunction<LLVMSetDataLayoutDelegate> "LLVMSetDataLayout")
+let llvmGetTarget = lazy (NativeLibrary.getFunction<LLVMGetTargetDelegate> "LLVMGetTarget")
+let llvmSetTarget = lazy (NativeLibrary.getFunction<LLVMSetTargetDelegate> "LLVMSetTarget")
+let llvmDumpModule = lazy (NativeLibrary.getFunction<LLVMDumpModuleDelegate> "LLVMDumpModule")
+let llvmPrintModuleToFile = lazy (NativeLibrary.getFunction<LLVMPrintModuleToFileDelegate> "LLVMPrintModuleToFile")
+let llvmPrintModuleToString = lazy (NativeLibrary.getFunction<LLVMPrintModuleToStringDelegate> "LLVMPrintModuleToString")
+let llvmVerifyModule = lazy (NativeLibrary.getFunction<LLVMVerifyModuleDelegate> "LLVMVerifyModule")
+let llvmGetModuleContext = lazy (NativeLibrary.getFunction<LLVMGetModuleContextDelegate> "LLVMGetModuleContext")
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTargetDataRef LLVMCreateTargetData([<MarshalAs(UnmanagedType.LPStr)>] string StringRep)
+// Type Functions
+let llvmGetTypeKind = lazy (NativeLibrary.getFunction<LLVMGetTypeKindDelegate> "LLVMGetTypeKind")
+let llvmTypeIsSized = lazy (NativeLibrary.getFunction<LLVMTypeIsSizedDelegate> "LLVMTypeIsSized")
+let llvmGetTypeContext = lazy (NativeLibrary.getFunction<LLVMGetTypeContextDelegate> "LLVMGetTypeContext")
+let llvmDumpType = lazy (NativeLibrary.getFunction<LLVMDumpTypeDelegate> "LLVMDumpType")
+let llvmPrintTypeToString = lazy (NativeLibrary.getFunction<LLVMPrintTypeToStringDelegate> "LLVMPrintTypeToString")
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMDisposeTargetData(LLVMTargetDataRef TD)
+// Integer types
+let llvmInt1TypeInContext = lazy (NativeLibrary.getFunction<LLVMInt1TypeInContextDelegate> "LLVMInt1TypeInContext")
+let llvmInt8TypeInContext = lazy (NativeLibrary.getFunction<LLVMInt8TypeInContextDelegate> "LLVMInt8TypeInContext")
+let llvmInt16TypeInContext = lazy (NativeLibrary.getFunction<LLVMInt16TypeInContextDelegate> "LLVMInt16TypeInContext")
+let llvmInt32TypeInContext = lazy (NativeLibrary.getFunction<LLVMInt32TypeInContextDelegate> "LLVMInt32TypeInContext")
+let llvmInt64TypeInContext = lazy (NativeLibrary.getFunction<LLVMInt64TypeInContextDelegate> "LLVMInt64TypeInContext")
+let llvmInt128TypeInContext = lazy (NativeLibrary.getFunction<LLVMInt128TypeInContextDelegate> "LLVMInt128TypeInContext")
+let llvmIntTypeInContext = lazy (NativeLibrary.getFunction<LLVMIntTypeInContextDelegate> "LLVMIntTypeInContext")
+let llvmGetIntTypeWidth = lazy (NativeLibrary.getFunction<LLVMGetIntTypeWidthDelegate> "LLVMGetIntTypeWidth")
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMCopyStringRepOfTargetData(LLVMTargetDataRef TD)
+// Floating point types
+let llvmHalfTypeInContext = lazy (NativeLibrary.getFunction<LLVMHalfTypeInContextDelegate> "LLVMHalfTypeInContext")
+let llvmBFloatTypeInContext = lazy (NativeLibrary.getFunction<LLVMBFloatTypeInContextDelegate> "LLVMBFloatTypeInContext")
+let llvmFloatTypeInContext = lazy (NativeLibrary.getFunction<LLVMFloatTypeInContextDelegate> "LLVMFloatTypeInContext")
+let llvmDoubleTypeInContext = lazy (NativeLibrary.getFunction<LLVMDoubleTypeInContextDelegate> "LLVMDoubleTypeInContext")
+let llvmX86FP80TypeInContext = lazy (NativeLibrary.getFunction<LLVMX86FP80TypeInContextDelegate> "LLVMX86FP80TypeInContext")
+let llvmFP128TypeInContext = lazy (NativeLibrary.getFunction<LLVMFP128TypeInContextDelegate> "LLVMFP128TypeInContext")
+let llvmPPCFP128TypeInContext = lazy (NativeLibrary.getFunction<LLVMPPCFP128TypeInContextDelegate> "LLVMPPCFP128TypeInContext")
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMPointerSize(LLVMTargetDataRef TD)
+// Other types
+let llvmVoidTypeInContext = lazy (NativeLibrary.getFunction<LLVMVoidTypeInContextDelegate> "LLVMVoidTypeInContext")
+let llvmLabelTypeInContext = lazy (NativeLibrary.getFunction<LLVMLabelTypeInContextDelegate> "LLVMLabelTypeInContext")
+let llvmX86AMXTypeInContext = lazy (NativeLibrary.getFunction<LLVMX86AMXTypeInContextDelegate> "LLVMX86AMXTypeInContext")
+let llvmTokenTypeInContext = lazy (NativeLibrary.getFunction<LLVMTokenTypeInContextDelegate> "LLVMTokenTypeInContext")
+let llvmMetadataTypeInContext = lazy (NativeLibrary.getFunction<LLVMMetadataTypeInContextDelegate> "LLVMMetadataTypeInContext")
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMPointerSizeForAS(LLVMTargetDataRef TD, uint32 AS)
+// Pointer types
+let llvmPointerType = lazy (NativeLibrary.getFunction<LLVMPointerTypeDelegate> "LLVMPointerType")
+let llvmPointerTypeInContext = lazy (NativeLibrary.getFunction<LLVMPointerTypeInContextDelegate> "LLVMPointerTypeInContext")
+let llvmPointerTypeIsOpaque = lazy (NativeLibrary.getFunction<LLVMPointerTypeIsOpaqueDelegate> "LLVMPointerTypeIsOpaque")
+let llvmGetPointerAddressSpace = lazy (NativeLibrary.getFunction<LLVMGetPointerAddressSpaceDelegate> "LLVMGetPointerAddressSpace")
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMIntPtrType(LLVMTargetDataRef TD)
+// Function types
+let llvmFunctionType = lazy (NativeLibrary.getFunction<LLVMFunctionTypeDelegate> "LLVMFunctionType")
+let llvmIsFunctionVarArg = lazy (NativeLibrary.getFunction<LLVMIsFunctionVarArgDelegate> "LLVMIsFunctionVarArg")
+let llvmGetReturnType = lazy (NativeLibrary.getFunction<LLVMGetReturnTypeDelegate> "LLVMGetReturnType")
+let llvmCountParamTypes = lazy (NativeLibrary.getFunction<LLVMCountParamTypesDelegate> "LLVMCountParamTypes")
+let llvmGetParamTypes = lazy (NativeLibrary.getFunction<LLVMGetParamTypesDelegate> "LLVMGetParamTypes")
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMIntPtrTypeForAS(LLVMTargetDataRef TD, uint32 AS)
+// Array types
+let llvmArrayType = lazy (NativeLibrary.getFunction<LLVMArrayTypeDelegate> "LLVMArrayType")
+let llvmArrayType2 = lazy (NativeLibrary.getFunction<LLVMArrayType2Delegate> "LLVMArrayType2")
+let llvmGetArrayLength = lazy (NativeLibrary.getFunction<LLVMGetArrayLengthDelegate> "LLVMGetArrayLength")
+let llvmGetArrayLength2 = lazy (NativeLibrary.getFunction<LLVMGetArrayLength2Delegate> "LLVMGetArrayLength2")
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMIntPtrTypeInContext(LLVMContextRef C, LLVMTargetDataRef TD)
+// Vector types
+let llvmVectorType = lazy (NativeLibrary.getFunction<LLVMVectorTypeDelegate> "LLVMVectorType")
+let llvmScalableVectorType = lazy (NativeLibrary.getFunction<LLVMScalableVectorTypeDelegate> "LLVMScalableVectorType")
+let llvmGetVectorSize = lazy (NativeLibrary.getFunction<LLVMGetVectorSizeDelegate> "LLVMGetVectorSize")
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMTypeRef LLVMIntPtrTypeForASInContext(LLVMContextRef C, LLVMTargetDataRef TD, uint32 AS)
+// Sequential types
+let llvmGetElementType = lazy (NativeLibrary.getFunction<LLVMGetElementTypeDelegate> "LLVMGetElementType")
+let llvmGetSubtypes = lazy (NativeLibrary.getFunction<LLVMGetSubtypesDelegate> "LLVMGetSubtypes")
+let llvmGetNumContainedTypes = lazy (NativeLibrary.getFunction<LLVMGetNumContainedTypesDelegate> "LLVMGetNumContainedTypes")
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint64 LLVMSizeOfTypeInBits(LLVMTargetDataRef TD, LLVMTypeRef Ty)
+// Struct types
+let llvmStructTypeInContext = lazy (NativeLibrary.getFunction<LLVMStructTypeInContextDelegate> "LLVMStructTypeInContext")
+let llvmStructType = lazy (NativeLibrary.getFunction<LLVMStructTypeDelegate> "LLVMStructType")
+let llvmStructCreateNamed = lazy (NativeLibrary.getFunction<LLVMStructCreateNamedDelegate> "LLVMStructCreateNamed")
+let llvmGetStructName = lazy (NativeLibrary.getFunction<LLVMGetStructNameDelegate> "LLVMGetStructName")
+let llvmStructSetBody = lazy (NativeLibrary.getFunction<LLVMStructSetBodyDelegate> "LLVMStructSetBody")
+let llvmCountStructElementTypes = lazy (NativeLibrary.getFunction<LLVMCountStructElementTypesDelegate> "LLVMCountStructElementTypes")
+let llvmGetStructElementTypes = lazy (NativeLibrary.getFunction<LLVMGetStructElementTypesDelegate> "LLVMGetStructElementTypes")
+let llvmStructGetTypeAtIndex = lazy (NativeLibrary.getFunction<LLVMStructGetTypeAtIndexDelegate> "LLVMStructGetTypeAtIndex")
+let llvmIsPackedStruct = lazy (NativeLibrary.getFunction<LLVMIsPackedStructDelegate> "LLVMIsPackedStruct")
+let llvmIsOpaqueStruct = lazy (NativeLibrary.getFunction<LLVMIsOpaqueStructDelegate> "LLVMIsOpaqueStruct")
+let llvmIsLiteralStruct = lazy (NativeLibrary.getFunction<LLVMIsLiteralStructDelegate> "LLVMIsLiteralStruct")
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint64 LLVMStoreSizeOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
+// Global context versions
+let llvmInt1Type = lazy (NativeLibrary.getFunction<LLVMInt1TypeDelegate> "LLVMInt1Type")
+let llvmInt8Type = lazy (NativeLibrary.getFunction<LLVMInt8TypeDelegate> "LLVMInt8Type")
+let llvmInt16Type = lazy (NativeLibrary.getFunction<LLVMInt16TypeDelegate> "LLVMInt16Type")
+let llvmInt32Type = lazy (NativeLibrary.getFunction<LLVMInt32TypeDelegate> "LLVMInt32Type")
+let llvmInt64Type = lazy (NativeLibrary.getFunction<LLVMInt64TypeDelegate> "LLVMInt64Type")
+let llvmInt128Type = lazy (NativeLibrary.getFunction<LLVMInt128TypeDelegate> "LLVMInt128Type")
+let llvmIntType = lazy (NativeLibrary.getFunction<LLVMIntTypeDelegate> "LLVMIntType")
+let llvmHalfType = lazy (NativeLibrary.getFunction<LLVMHalfTypeDelegate> "LLVMHalfType")
+let llvmBFloatType = lazy (NativeLibrary.getFunction<LLVMBFloatTypeDelegate> "LLVMBFloatType")
+let llvmFloatType = lazy (NativeLibrary.getFunction<LLVMFloatTypeDelegate> "LLVMFloatType")
+let llvmDoubleType = lazy (NativeLibrary.getFunction<LLVMDoubleTypeDelegate> "LLVMDoubleType")
+let llvmX86FP80Type = lazy (NativeLibrary.getFunction<LLVMX86FP80TypeDelegate> "LLVMX86FP80Type")
+let llvmFP128Type = lazy (NativeLibrary.getFunction<LLVMFP128TypeDelegate> "LLVMFP128Type")
+let llvmPPCFP128Type = lazy (NativeLibrary.getFunction<LLVMPPCFP128TypeDelegate> "LLVMPPCFP128Type")
+let llvmVoidType = lazy (NativeLibrary.getFunction<LLVMVoidTypeDelegate> "LLVMVoidType")
+let llvmLabelType = lazy (NativeLibrary.getFunction<LLVMLabelTypeDelegate> "LLVMLabelType")
+let llvmX86AMXType = lazy (NativeLibrary.getFunction<LLVMX86AMXTypeDelegate> "LLVMX86AMXType")
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint64 LLVMABISizeOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
+// Value and Constant Functions
+let llvmTypeOf = lazy (NativeLibrary.getFunction<LLVMTypeOfDelegate> "LLVMTypeOf")
+let llvmDumpValue = lazy (NativeLibrary.getFunction<LLVMDumpValueDelegate> "LLVMDumpValue")
+let llvmPrintValueToString = lazy (NativeLibrary.getFunction<LLVMPrintValueToStringDelegate> "LLVMPrintValueToString")
+let llvmGetValueName2 = lazy (NativeLibrary.getFunction<LLVMGetValueName2Delegate> "LLVMGetValueName2")
+let llvmSetValueName2 = lazy (NativeLibrary.getFunction<LLVMSetValueName2Delegate> "LLVMSetValueName2")
+let llvmGetValueContext = lazy (NativeLibrary.getFunction<LLVMGetValueContextDelegate> "LLVMGetValueContext")
+let llvmReplaceAllUsesWith = lazy (NativeLibrary.getFunction<LLVMReplaceAllUsesWithDelegate> "LLVMReplaceAllUsesWith")
+let llvmIsConstant = lazy (NativeLibrary.getFunction<LLVMIsConstantDelegate> "LLVMIsConstant")
+let llvmIsUndef = lazy (NativeLibrary.getFunction<LLVMIsUndefDelegate> "LLVMIsUndef")
+let llvmIsPoison = lazy (NativeLibrary.getFunction<LLVMIsPoisonDelegate> "LLVMIsPoison")
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMABIAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
+// Constants
+let llvmConstNull = lazy (NativeLibrary.getFunction<LLVMConstNullDelegate> "LLVMConstNull")
+let llvmConstAllOnes = lazy (NativeLibrary.getFunction<LLVMConstAllOnesDelegate> "LLVMConstAllOnes")
+let llvmGetUndef = lazy (NativeLibrary.getFunction<LLVMGetUndefDelegate> "LLVMGetUndef")
+let llvmGetPoison = lazy (NativeLibrary.getFunction<LLVMGetPoisonDelegate> "LLVMGetPoison")
+let llvmIsNull = lazy (NativeLibrary.getFunction<LLVMIsNullDelegate> "LLVMIsNull")
+let llvmConstPointerNull = lazy (NativeLibrary.getFunction<LLVMConstPointerNullDelegate> "LLVMConstPointerNull")
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMCallFrameAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
+// Scalar constants
+let llvmConstInt = lazy (NativeLibrary.getFunction<LLVMConstIntDelegate> "LLVMConstInt")
+let llvmConstIntOfArbitraryPrecision = lazy (NativeLibrary.getFunction<LLVMConstIntOfArbitraryPrecisionDelegate> "LLVMConstIntOfArbitraryPrecision")
+let llvmConstIntOfString = lazy (NativeLibrary.getFunction<LLVMConstIntOfStringDelegate> "LLVMConstIntOfString")
+let llvmConstIntOfStringAndSize = lazy (NativeLibrary.getFunction<LLVMConstIntOfStringAndSizeDelegate> "LLVMConstIntOfStringAndSize")
+let llvmConstReal = lazy (NativeLibrary.getFunction<LLVMConstRealDelegate> "LLVMConstReal")
+let llvmConstRealOfString = lazy (NativeLibrary.getFunction<LLVMConstRealOfStringDelegate> "LLVMConstRealOfString")
+let llvmConstRealOfStringAndSize = lazy (NativeLibrary.getFunction<LLVMConstRealOfStringAndSizeDelegate> "LLVMConstRealOfStringAndSize")
+let llvmConstIntGetZExtValue = lazy (NativeLibrary.getFunction<LLVMConstIntGetZExtValueDelegate> "LLVMConstIntGetZExtValue")
+let llvmConstIntGetSExtValue = lazy (NativeLibrary.getFunction<LLVMConstIntGetSExtValueDelegate> "LLVMConstIntGetSExtValue")
+let llvmConstRealGetDouble = lazy (NativeLibrary.getFunction<LLVMConstRealGetDoubleDelegate> "LLVMConstRealGetDouble")
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMPreferredAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
+// Composite constants
+let llvmConstStringInContext = lazy (NativeLibrary.getFunction<LLVMConstStringInContextDelegate> "LLVMConstStringInContext")
+let llvmConstStringInContext2 = lazy (NativeLibrary.getFunction<LLVMConstStringInContext2Delegate> "LLVMConstStringInContext2")
+let llvmConstString = lazy (NativeLibrary.getFunction<LLVMConstStringDelegate> "LLVMConstString")
+let llvmIsConstantString = lazy (NativeLibrary.getFunction<LLVMIsConstantStringDelegate> "LLVMIsConstantString")
+let llvmGetAsString = lazy (NativeLibrary.getFunction<LLVMGetAsStringDelegate> "LLVMGetAsString")
+let llvmConstStructInContext = lazy (NativeLibrary.getFunction<LLVMConstStructInContextDelegate> "LLVMConstStructInContext")
+let llvmConstStruct = lazy (NativeLibrary.getFunction<LLVMConstStructDelegate> "LLVMConstStruct")
+let llvmConstNamedStruct = lazy (NativeLibrary.getFunction<LLVMConstNamedStructDelegate> "LLVMConstNamedStruct")
+let llvmGetAggregateElement = lazy (NativeLibrary.getFunction<LLVMGetAggregateElementDelegate> "LLVMGetAggregateElement")
+let llvmConstArray = lazy (NativeLibrary.getFunction<LLVMConstArrayDelegate> "LLVMConstArray")
+let llvmConstArray2 = lazy (NativeLibrary.getFunction<LLVMConstArray2Delegate> "LLVMConstArray2")
+let llvmConstVector = lazy (NativeLibrary.getFunction<LLVMConstVectorDelegate> "LLVMConstVector")
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMPreferredAlignmentOfGlobal(LLVMTargetDataRef TD, LLVMValueRef GlobalVar)
+// Global Values
+let llvmGetGlobalParent = lazy (NativeLibrary.getFunction<LLVMGetGlobalParentDelegate> "LLVMGetGlobalParent")
+let llvmIsDeclaration = lazy (NativeLibrary.getFunction<LLVMIsDeclarationDelegate> "LLVMIsDeclaration")
+let llvmGetLinkage = lazy (NativeLibrary.getFunction<LLVMGetLinkageDelegate> "LLVMGetLinkage")
+let llvmSetLinkage = lazy (NativeLibrary.getFunction<LLVMSetLinkageDelegate> "LLVMSetLinkage")
+let llvmGetSection = lazy (NativeLibrary.getFunction<LLVMGetSectionDelegate> "LLVMGetSection")
+let llvmSetSection = lazy (NativeLibrary.getFunction<LLVMSetSectionDelegate> "LLVMSetSection")
+let llvmGetVisibility = lazy (NativeLibrary.getFunction<LLVMGetVisibilityDelegate> "LLVMGetVisibility")
+let llvmSetVisibility = lazy (NativeLibrary.getFunction<LLVMSetVisibilityDelegate> "LLVMSetVisibility")
+let llvmGlobalGetValueType = lazy (NativeLibrary.getFunction<LLVMGlobalGetValueTypeDelegate> "LLVMGlobalGetValueType")
+let llvmGetAlignment = lazy (NativeLibrary.getFunction<LLVMGetAlignmentDelegate> "LLVMGetAlignment")
+let llvmSetAlignment = lazy (NativeLibrary.getFunction<LLVMSetAlignmentDelegate> "LLVMSetAlignment")
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMElementAtOffset(LLVMTargetDataRef TD, LLVMTypeRef StructTy, uint64 Offset)
+// Global variables
+let llvmAddGlobal = lazy (NativeLibrary.getFunction<LLVMAddGlobalDelegate> "LLVMAddGlobal")
+let llvmAddGlobalInAddressSpace = lazy (NativeLibrary.getFunction<LLVMAddGlobalInAddressSpaceDelegate> "LLVMAddGlobalInAddressSpace")
+let llvmGetNamedGlobal = lazy (NativeLibrary.getFunction<LLVMGetNamedGlobalDelegate> "LLVMGetNamedGlobal")
+let llvmGetFirstGlobal = lazy (NativeLibrary.getFunction<LLVMGetFirstGlobalDelegate> "LLVMGetFirstGlobal")
+let llvmGetLastGlobal = lazy (NativeLibrary.getFunction<LLVMGetLastGlobalDelegate> "LLVMGetLastGlobal")
+let llvmGetNextGlobal = lazy (NativeLibrary.getFunction<LLVMGetNextGlobalDelegate> "LLVMGetNextGlobal")
+let llvmGetPreviousGlobal = lazy (NativeLibrary.getFunction<LLVMGetPreviousGlobalDelegate> "LLVMGetPreviousGlobal")
+let llvmDeleteGlobal = lazy (NativeLibrary.getFunction<LLVMDeleteGlobalDelegate> "LLVMDeleteGlobal")
+let llvmGetInitializer = lazy (NativeLibrary.getFunction<LLVMGetInitializerDelegate> "LLVMGetInitializer")
+let llvmSetInitializer = lazy (NativeLibrary.getFunction<LLVMSetInitializerDelegate> "LLVMSetInitializer")
+let llvmIsThreadLocal = lazy (NativeLibrary.getFunction<LLVMIsThreadLocalDelegate> "LLVMIsThreadLocal")
+let llvmSetThreadLocal = lazy (NativeLibrary.getFunction<LLVMSetThreadLocalDelegate> "LLVMSetThreadLocal")
+let llvmIsGlobalConstant = lazy (NativeLibrary.getFunction<LLVMIsGlobalConstantDelegate> "LLVMIsGlobalConstant")
+let llvmSetGlobalConstant = lazy (NativeLibrary.getFunction<LLVMSetGlobalConstantDelegate> "LLVMSetGlobalConstant")
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint64 LLVMOffsetOfElement(LLVMTargetDataRef TD, LLVMTypeRef StructTy, uint32 Element)
+// Functions
+let llvmAddFunction = lazy (NativeLibrary.getFunction<LLVMAddFunctionDelegate> "LLVMAddFunction")
+let llvmGetNamedFunction = lazy (NativeLibrary.getFunction<LLVMGetNamedFunctionDelegate> "LLVMGetNamedFunction")
+let llvmGetFirstFunction = lazy (NativeLibrary.getFunction<LLVMGetFirstFunctionDelegate> "LLVMGetFirstFunction")
+let llvmGetLastFunction = lazy (NativeLibrary.getFunction<LLVMGetLastFunctionDelegate> "LLVMGetLastFunction")
+let llvmGetNextFunction = lazy (NativeLibrary.getFunction<LLVMGetNextFunctionDelegate> "LLVMGetNextFunction")
+let llvmGetPreviousFunction = lazy (NativeLibrary.getFunction<LLVMGetPreviousFunctionDelegate> "LLVMGetPreviousFunction")
+let llvmDeleteFunction = lazy (NativeLibrary.getFunction<LLVMDeleteFunctionDelegate> "LLVMDeleteFunction")
+let llvmHasPersonalityFn = lazy (NativeLibrary.getFunction<LLVMHasPersonalityFnDelegate> "LLVMHasPersonalityFn")
+let llvmGetPersonalityFn = lazy (NativeLibrary.getFunction<LLVMGetPersonalityFnDelegate> "LLVMGetPersonalityFn")
+let llvmSetPersonalityFn = lazy (NativeLibrary.getFunction<LLVMSetPersonalityFnDelegate> "LLVMSetPersonalityFn")
+let llvmGetIntrinsicID = lazy (NativeLibrary.getFunction<LLVMGetIntrinsicIDDelegate> "LLVMGetIntrinsicID")
+let llvmGetFunctionCallConv = lazy (NativeLibrary.getFunction<LLVMGetFunctionCallConvDelegate> "LLVMGetFunctionCallConv")
+let llvmSetFunctionCallConv = lazy (NativeLibrary.getFunction<LLVMSetFunctionCallConvDelegate> "LLVMSetFunctionCallConv")
+let llvmGetGC = lazy (NativeLibrary.getFunction<LLVMGetGCDelegate> "LLVMGetGC")
+let llvmSetGC = lazy (NativeLibrary.getFunction<LLVMSetGCDelegate> "LLVMSetGC")
+let llvmCountParams = lazy (NativeLibrary.getFunction<LLVMCountParamsDelegate> "LLVMCountParams")
+let llvmGetParams = lazy (NativeLibrary.getFunction<LLVMGetParamsDelegate> "LLVMGetParams")
+let llvmGetParam = lazy (NativeLibrary.getFunction<LLVMGetParamDelegate> "LLVMGetParam")
+let llvmGetParamParent = lazy (NativeLibrary.getFunction<LLVMGetParamParentDelegate> "LLVMGetParamParent")
+let llvmGetFirstParam = lazy (NativeLibrary.getFunction<LLVMGetFirstParamDelegate> "LLVMGetFirstParam")
+let llvmGetLastParam = lazy (NativeLibrary.getFunction<LLVMGetLastParamDelegate> "LLVMGetLastParam")
+let llvmGetNextParam = lazy (NativeLibrary.getFunction<LLVMGetNextParamDelegate> "LLVMGetNextParam")
+let llvmGetPreviousParam = lazy (NativeLibrary.getFunction<LLVMGetPreviousParamDelegate> "LLVMGetPreviousParam")
+let llvmSetParamAlignment = lazy (NativeLibrary.getFunction<LLVMSetParamAlignmentDelegate> "LLVMSetParamAlignment")
+
+// Basic Block Functions
+let llvmBasicBlockAsValue = lazy (NativeLibrary.getFunction<LLVMBasicBlockAsValueDelegate> "LLVMBasicBlockAsValue")
+let llvmValueIsBasicBlock = lazy (NativeLibrary.getFunction<LLVMValueIsBasicBlockDelegate> "LLVMValueIsBasicBlock")
+let llvmValueAsBasicBlock = lazy (NativeLibrary.getFunction<LLVMValueAsBasicBlockDelegate> "LLVMValueAsBasicBlock")
+let llvmGetBasicBlockName = lazy (NativeLibrary.getFunction<LLVMGetBasicBlockNameDelegate> "LLVMGetBasicBlockName")
+let llvmGetBasicBlockParent = lazy (NativeLibrary.getFunction<LLVMGetBasicBlockParentDelegate> "LLVMGetBasicBlockParent")
+let llvmGetBasicBlockTerminator = lazy (NativeLibrary.getFunction<LLVMGetBasicBlockTerminatorDelegate> "LLVMGetBasicBlockTerminator")
+let llvmCountBasicBlocks = lazy (NativeLibrary.getFunction<LLVMCountBasicBlocksDelegate> "LLVMCountBasicBlocks")
+let llvmGetBasicBlocks = lazy (NativeLibrary.getFunction<LLVMGetBasicBlocksDelegate> "LLVMGetBasicBlocks")
+let llvmGetFirstBasicBlock = lazy (NativeLibrary.getFunction<LLVMGetFirstBasicBlockDelegate> "LLVMGetFirstBasicBlock")
+let llvmGetLastBasicBlock = lazy (NativeLibrary.getFunction<LLVMGetLastBasicBlockDelegate> "LLVMGetLastBasicBlock")
+let llvmGetNextBasicBlock = lazy (NativeLibrary.getFunction<LLVMGetNextBasicBlockDelegate> "LLVMGetNextBasicBlock")
+let llvmGetPreviousBasicBlock = lazy (NativeLibrary.getFunction<LLVMGetPreviousBasicBlockDelegate> "LLVMGetPreviousBasicBlock")
+let llvmGetEntryBasicBlock = lazy (NativeLibrary.getFunction<LLVMGetEntryBasicBlockDelegate> "LLVMGetEntryBasicBlock")
+let llvmInsertExistingBasicBlockAfterInsertBlock = lazy (NativeLibrary.getFunction<LLVMInsertExistingBasicBlockAfterInsertBlockDelegate> "LLVMInsertExistingBasicBlockAfterInsertBlock")
+let llvmAppendExistingBasicBlock = lazy (NativeLibrary.getFunction<LLVMAppendExistingBasicBlockDelegate> "LLVMAppendExistingBasicBlock")
+let llvmCreateBasicBlockInContext = lazy (NativeLibrary.getFunction<LLVMCreateBasicBlockInContextDelegate> "LLVMCreateBasicBlockInContext")
+let llvmAppendBasicBlockInContext = lazy (NativeLibrary.getFunction<LLVMAppendBasicBlockInContextDelegate> "LLVMAppendBasicBlockInContext")
+let llvmAppendBasicBlock = lazy (NativeLibrary.getFunction<LLVMAppendBasicBlockDelegate> "LLVMAppendBasicBlock")
+let llvmInsertBasicBlockInContext = lazy (NativeLibrary.getFunction<LLVMInsertBasicBlockInContextDelegate> "LLVMInsertBasicBlockInContext")
+let llvmInsertBasicBlock = lazy (NativeLibrary.getFunction<LLVMInsertBasicBlockDelegate> "LLVMInsertBasicBlock")
+let llvmDeleteBasicBlock = lazy (NativeLibrary.getFunction<LLVMDeleteBasicBlockDelegate> "LLVMDeleteBasicBlock")
+let llvmRemoveBasicBlockFromParent = lazy (NativeLibrary.getFunction<LLVMRemoveBasicBlockFromParentDelegate> "LLVMRemoveBasicBlockFromParent")
+let llvmMoveBasicBlockBefore = lazy (NativeLibrary.getFunction<LLVMMoveBasicBlockBeforeDelegate> "LLVMMoveBasicBlockBefore")
+let llvmMoveBasicBlockAfter = lazy (NativeLibrary.getFunction<LLVMMoveBasicBlockAfterDelegate> "LLVMMoveBasicBlockAfter")
+let llvmGetFirstInstruction = lazy (NativeLibrary.getFunction<LLVMGetFirstInstructionDelegate> "LLVMGetFirstInstruction")
+let llvmGetLastInstruction = lazy (NativeLibrary.getFunction<LLVMGetLastInstructionDelegate> "LLVMGetLastInstruction")
+
+// Instruction Builder Functions
+let llvmCreateBuilderInContext = lazy (NativeLibrary.getFunction<LLVMCreateBuilderInContextDelegate> "LLVMCreateBuilderInContext")
+let llvmCreateBuilder = lazy (NativeLibrary.getFunction<LLVMCreateBuilderDelegate> "LLVMCreateBuilder")
+let llvmPositionBuilder = lazy (NativeLibrary.getFunction<LLVMPositionBuilderDelegate> "LLVMPositionBuilder")
+let llvmPositionBuilderBefore = lazy (NativeLibrary.getFunction<LLVMPositionBuilderBeforeDelegate> "LLVMPositionBuilderBefore")
+let llvmPositionBuilderAtEnd = lazy (NativeLibrary.getFunction<LLVMPositionBuilderAtEndDelegate> "LLVMPositionBuilderAtEnd")
+let llvmGetInsertBlock = lazy (NativeLibrary.getFunction<LLVMGetInsertBlockDelegate> "LLVMGetInsertBlock")
+let llvmClearInsertionPosition = lazy (NativeLibrary.getFunction<LLVMClearInsertionPositionDelegate> "LLVMClearInsertionPosition")
+let llvmInsertIntoBuilder = lazy (NativeLibrary.getFunction<LLVMInsertIntoBuilderDelegate> "LLVMInsertIntoBuilder")
+let llvmInsertIntoBuilderWithName = lazy (NativeLibrary.getFunction<LLVMInsertIntoBuilderWithNameDelegate> "LLVMInsertIntoBuilderWithName")
+let llvmDisposeBuilder = lazy (NativeLibrary.getFunction<LLVMDisposeBuilderDelegate> "LLVMDisposeBuilder")
+let llvmGetBuilderContext = lazy (NativeLibrary.getFunction<LLVMGetBuilderContextDelegate> "LLVMGetBuilderContext")
+
+// Metadata
+let llvmGetCurrentDebugLocation2 = lazy (NativeLibrary.getFunction<LLVMGetCurrentDebugLocation2Delegate> "LLVMGetCurrentDebugLocation2")
+let llvmSetCurrentDebugLocation2 = lazy (NativeLibrary.getFunction<LLVMSetCurrentDebugLocation2Delegate> "LLVMSetCurrentDebugLocation2")
+let llvmAddMetadataToInst = lazy (NativeLibrary.getFunction<LLVMAddMetadataToInstDelegate> "LLVMAddMetadataToInst")
+
+// Terminator Instructions
+let llvmBuildRetVoid = lazy (NativeLibrary.getFunction<LLVMBuildRetVoidDelegate> "LLVMBuildRetVoid")
+let llvmBuildRet = lazy (NativeLibrary.getFunction<LLVMBuildRetDelegate> "LLVMBuildRet")
+let llvmBuildAggregateRet = lazy (NativeLibrary.getFunction<LLVMBuildAggregateRetDelegate> "LLVMBuildAggregateRet")
+let llvmBuildBr = lazy (NativeLibrary.getFunction<LLVMBuildBrDelegate> "LLVMBuildBr")
+let llvmBuildCondBr = lazy (NativeLibrary.getFunction<LLVMBuildCondBrDelegate> "LLVMBuildCondBr")
+let llvmBuildSwitch = lazy (NativeLibrary.getFunction<LLVMBuildSwitchDelegate> "LLVMBuildSwitch")
+let llvmBuildIndirectBr = lazy (NativeLibrary.getFunction<LLVMBuildIndirectBrDelegate> "LLVMBuildIndirectBr")
+let llvmBuildInvoke2 = lazy (NativeLibrary.getFunction<LLVMBuildInvoke2Delegate> "LLVMBuildInvoke2")
+let llvmBuildUnreachable = lazy (NativeLibrary.getFunction<LLVMBuildUnreachableDelegate> "LLVMBuildUnreachable")
+
+// Exception Handling
+let llvmBuildResume = lazy (NativeLibrary.getFunction<LLVMBuildResumeDelegate> "LLVMBuildResume")
+let llvmBuildLandingPad = lazy (NativeLibrary.getFunction<LLVMBuildLandingPadDelegate> "LLVMBuildLandingPad")
+let llvmBuildCleanupRet = lazy (NativeLibrary.getFunction<LLVMBuildCleanupRetDelegate> "LLVMBuildCleanupRet")
+let llvmBuildCatchRet = lazy (NativeLibrary.getFunction<LLVMBuildCatchRetDelegate> "LLVMBuildCatchRet")
+let llvmBuildCatchPad = lazy (NativeLibrary.getFunction<LLVMBuildCatchPadDelegate> "LLVMBuildCatchPad")
+let llvmBuildCleanupPad = lazy (NativeLibrary.getFunction<LLVMBuildCleanupPadDelegate> "LLVMBuildCleanupPad")
+let llvmBuildCatchSwitch = lazy (NativeLibrary.getFunction<LLVMBuildCatchSwitchDelegate> "LLVMBuildCatchSwitch")
+
+// Control flow helpers
+let llvmAddCase = lazy (NativeLibrary.getFunction<LLVMAddCaseDelegate> "LLVMAddCase")
+let llvmAddDestination = lazy (NativeLibrary.getFunction<LLVMAddDestinationDelegate> "LLVMAddDestination")
+
+// Arithmetic Instructions
+let llvmBuildAdd = lazy (NativeLibrary.getFunction<LLVMBuildAddDelegate> "LLVMBuildAdd")
+let llvmBuildNSWAdd = lazy (NativeLibrary.getFunction<LLVMBuildNSWAddDelegate> "LLVMBuildNSWAdd")
+let llvmBuildNUWAdd = lazy (NativeLibrary.getFunction<LLVMBuildNUWAddDelegate> "LLVMBuildNUWAdd")
+let llvmBuildFAdd = lazy (NativeLibrary.getFunction<LLVMBuildFAddDelegate> "LLVMBuildFAdd")
+let llvmBuildSub = lazy (NativeLibrary.getFunction<LLVMBuildSubDelegate> "LLVMBuildSub")
+let llvmBuildNSWSub = lazy (NativeLibrary.getFunction<LLVMBuildNSWSubDelegate> "LLVMBuildNSWSub")
+let llvmBuildNUWSub = lazy (NativeLibrary.getFunction<LLVMBuildNUWSubDelegate> "LLVMBuildNUWSub")
+let llvmBuildFSub = lazy (NativeLibrary.getFunction<LLVMBuildFSubDelegate> "LLVMBuildFSub")
+let llvmBuildMul = lazy (NativeLibrary.getFunction<LLVMBuildMulDelegate> "LLVMBuildMul")
+let llvmBuildNSWMul = lazy (NativeLibrary.getFunction<LLVMBuildNSWMulDelegate> "LLVMBuildNSWMul")
+let llvmBuildNUWMul = lazy (NativeLibrary.getFunction<LLVMBuildNUWMulDelegate> "LLVMBuildNUWMul")
+let llvmBuildFMul = lazy (NativeLibrary.getFunction<LLVMBuildFMulDelegate> "LLVMBuildFMul")
+let llvmBuildUDiv = lazy (NativeLibrary.getFunction<LLVMBuildUDivDelegate> "LLVMBuildUDiv")
+let llvmBuildExactUDiv = lazy (NativeLibrary.getFunction<LLVMBuildExactUDivDelegate> "LLVMBuildExactUDiv")
+let llvmBuildSDiv = lazy (NativeLibrary.getFunction<LLVMBuildSDivDelegate> "LLVMBuildSDiv")
+let llvmBuildExactSDiv = lazy (NativeLibrary.getFunction<LLVMBuildExactSDivDelegate> "LLVMBuildExactSDiv")
+let llvmBuildFDiv = lazy (NativeLibrary.getFunction<LLVMBuildFDivDelegate> "LLVMBuildFDiv")
+let llvmBuildURem = lazy (NativeLibrary.getFunction<LLVMBuildURemDelegate> "LLVMBuildURem")
+let llvmBuildSRem = lazy (NativeLibrary.getFunction<LLVMBuildSRemDelegate> "LLVMBuildSRem")
+let llvmBuildFRem = lazy (NativeLibrary.getFunction<LLVMBuildFRemDelegate> "LLVMBuildFRem")
+let llvmBuildShl = lazy (NativeLibrary.getFunction<LLVMBuildShlDelegate> "LLVMBuildShl")
+let llvmBuildLShr = lazy (NativeLibrary.getFunction<LLVMBuildLShrDelegate> "LLVMBuildLShr")
+let llvmBuildAShr = lazy (NativeLibrary.getFunction<LLVMBuildAShrDelegate> "LLVMBuildAShr")
+let llvmBuildAnd = lazy (NativeLibrary.getFunction<LLVMBuildAndDelegate> "LLVMBuildAnd")
+let llvmBuildOr = lazy (NativeLibrary.getFunction<LLVMBuildOrDelegate> "LLVMBuildOr")
+let llvmBuildXor = lazy (NativeLibrary.getFunction<LLVMBuildXorDelegate> "LLVMBuildXor")
+let llvmBuildBinOp = lazy (NativeLibrary.getFunction<LLVMBuildBinOpDelegate> "LLVMBuildBinOp")
+let llvmBuildNeg = lazy (NativeLibrary.getFunction<LLVMBuildNegDelegate> "LLVMBuildNeg")
+let llvmBuildNSWNeg = lazy (NativeLibrary.getFunction<LLVMBuildNSWNegDelegate> "LLVMBuildNSWNeg")
+let llvmBuildFNeg = lazy (NativeLibrary.getFunction<LLVMBuildFNegDelegate> "LLVMBuildFNeg")
+let llvmBuildNot = lazy (NativeLibrary.getFunction<LLVMBuildNotDelegate> "LLVMBuildNot")
+
+// Arithmetic flags
+let llvmGetNUW = lazy (NativeLibrary.getFunction<LLVMGetNUWDelegate> "LLVMGetNUW")
+let llvmSetNUW = lazy (NativeLibrary.getFunction<LLVMSetNUWDelegate> "LLVMSetNUW")
+let llvmGetNSW = lazy (NativeLibrary.getFunction<LLVMGetNSWDelegate> "LLVMGetNSW")
+let llvmSetNSW = lazy (NativeLibrary.getFunction<LLVMSetNSWDelegate> "LLVMSetNSW")
+let llvmGetExact = lazy (NativeLibrary.getFunction<LLVMGetExactDelegate> "LLVMGetExact")
+let llvmSetExact = lazy (NativeLibrary.getFunction<LLVMSetExactDelegate> "LLVMSetExact")
+
+// Memory Instructions
+let llvmBuildAlloca = lazy (NativeLibrary.getFunction<LLVMBuildAllocaDelegate> "LLVMBuildAlloca")
+let llvmBuildArrayAlloca = lazy (NativeLibrary.getFunction<LLVMBuildArrayAllocaDelegate> "LLVMBuildArrayAlloca")
+let llvmBuildLoad2 = lazy (NativeLibrary.getFunction<LLVMBuildLoad2Delegate> "LLVMBuildLoad2")
+let llvmBuildStore = lazy (NativeLibrary.getFunction<LLVMBuildStoreDelegate> "LLVMBuildStore")
+let llvmBuildGEP2 = lazy (NativeLibrary.getFunction<LLVMBuildGEP2Delegate> "LLVMBuildGEP2")
+let llvmBuildInBoundsGEP2 = lazy (NativeLibrary.getFunction<LLVMBuildInBoundsGEP2Delegate> "LLVMBuildInBoundsGEP2")
+let llvmBuildStructGEP2 = lazy (NativeLibrary.getFunction<LLVMBuildStructGEP2Delegate> "LLVMBuildStructGEP2")
+let llvmBuildGlobalString = lazy (NativeLibrary.getFunction<LLVMBuildGlobalStringDelegate> "LLVMBuildGlobalString")
+let llvmBuildGlobalStringPtr = lazy (NativeLibrary.getFunction<LLVMBuildGlobalStringPtrDelegate> "LLVMBuildGlobalStringPtr")
+let llvmGetVolatile = lazy (NativeLibrary.getFunction<LLVMGetVolatileDelegate> "LLVMGetVolatile")
+let llvmSetVolatile = lazy (NativeLibrary.getFunction<LLVMSetVolatileDelegate> "LLVMSetVolatile")
+let llvmGetOrdering = lazy (NativeLibrary.getFunction<LLVMGetOrderingDelegate> "LLVMGetOrdering")
+let llvmSetOrdering = lazy (NativeLibrary.getFunction<LLVMSetOrderingDelegate> "LLVMSetOrdering")
+
+// Cast Instructions
+let llvmBuildTrunc = lazy (NativeLibrary.getFunction<LLVMBuildTruncDelegate> "LLVMBuildTrunc")
+let llvmBuildZExt = lazy (NativeLibrary.getFunction<LLVMBuildZExtDelegate> "LLVMBuildZExt")
+let llvmBuildSExt = lazy (NativeLibrary.getFunction<LLVMBuildSExtDelegate> "LLVMBuildSExt")
+let llvmBuildFPToUI = lazy (NativeLibrary.getFunction<LLVMBuildFPToUIDelegate> "LLVMBuildFPToUI")
+let llvmBuildFPToSI = lazy (NativeLibrary.getFunction<LLVMBuildFPToSIDelegate> "LLVMBuildFPToSI")
+let llvmBuildUIToFP = lazy (NativeLibrary.getFunction<LLVMBuildUIToFPDelegate> "LLVMBuildUIToFP")
+let llvmBuildSIToFP = lazy (NativeLibrary.getFunction<LLVMBuildSIToFPDelegate> "LLVMBuildSIToFP")
+let llvmBuildFPTrunc = lazy (NativeLibrary.getFunction<LLVMBuildFPTruncDelegate> "LLVMBuildFPTrunc")
+let llvmBuildFPExt = lazy (NativeLibrary.getFunction<LLVMBuildFPExtDelegate> "LLVMBuildFPExt")
+let llvmBuildPtrToInt = lazy (NativeLibrary.getFunction<LLVMBuildPtrToIntDelegate> "LLVMBuildPtrToInt")
+let llvmBuildIntToPtr = lazy (NativeLibrary.getFunction<LLVMBuildIntToPtrDelegate> "LLVMBuildIntToPtr")
+let llvmBuildBitCast = lazy (NativeLibrary.getFunction<LLVMBuildBitCastDelegate> "LLVMBuildBitCast")
+let llvmBuildAddrSpaceCast = lazy (NativeLibrary.getFunction<LLVMBuildAddrSpaceCastDelegate> "LLVMBuildAddrSpaceCast")
+let llvmBuildPointerCast = lazy (NativeLibrary.getFunction<LLVMBuildPointerCastDelegate> "LLVMBuildPointerCast")
+let llvmBuildIntCast2 = lazy (NativeLibrary.getFunction<LLVMBuildIntCast2Delegate> "LLVMBuildIntCast2")
+let llvmBuildFPCast = lazy (NativeLibrary.getFunction<LLVMBuildFPCastDelegate> "LLVMBuildFPCast")
+let llvmBuildCast = lazy (NativeLibrary.getFunction<LLVMBuildCastDelegate> "LLVMBuildCast")
+let llvmGetCastOpcode = lazy (NativeLibrary.getFunction<LLVMGetCastOpcodeDelegate> "LLVMGetCastOpcode")
+
+// Comparison Instructions
+let llvmBuildICmp = lazy (NativeLibrary.getFunction<LLVMBuildICmpDelegate> "LLVMBuildICmp")
+let llvmBuildFCmp = lazy (NativeLibrary.getFunction<LLVMBuildFCmpDelegate> "LLVMBuildFCmp")
+
+// Other Instructions
+let llvmBuildPhi = lazy (NativeLibrary.getFunction<LLVMBuildPhiDelegate> "LLVMBuildPhi")
+let llvmBuildCall2 = lazy (NativeLibrary.getFunction<LLVMBuildCall2Delegate> "LLVMBuildCall2")
+let llvmBuildSelect = lazy (NativeLibrary.getFunction<LLVMBuildSelectDelegate> "LLVMBuildSelect")
+let llvmBuildVAArg = lazy (NativeLibrary.getFunction<LLVMBuildVAArgDelegate> "LLVMBuildVAArg")
+let llvmBuildExtractElement = lazy (NativeLibrary.getFunction<LLVMBuildExtractElementDelegate> "LLVMBuildExtractElement")
+let llvmBuildInsertElement = lazy (NativeLibrary.getFunction<LLVMBuildInsertElementDelegate> "LLVMBuildInsertElement")
+let llvmBuildShuffleVector = lazy (NativeLibrary.getFunction<LLVMBuildShuffleVectorDelegate> "LLVMBuildShuffleVector")
+let llvmBuildExtractValue = lazy (NativeLibrary.getFunction<LLVMBuildExtractValueDelegate> "LLVMBuildExtractValue")
+let llvmBuildInsertValue = lazy (NativeLibrary.getFunction<LLVMBuildInsertValueDelegate> "LLVMBuildInsertValue")
+let llvmBuildFreeze = lazy (NativeLibrary.getFunction<LLVMBuildFreezeDelegate> "LLVMBuildFreeze")
+let llvmBuildIsNull = lazy (NativeLibrary.getFunction<LLVMBuildIsNullDelegate> "LLVMBuildIsNull")
+let llvmBuildIsNotNull = lazy (NativeLibrary.getFunction<LLVMBuildIsNotNullDelegate> "LLVMBuildIsNotNull")
+let llvmBuildPtrDiff2 = lazy (NativeLibrary.getFunction<LLVMBuildPtrDiff2Delegate> "LLVMBuildPtrDiff2")
+let llvmBuildFence = lazy (NativeLibrary.getFunction<LLVMBuildFenceDelegate> "LLVMBuildFence")
+let llvmBuildAtomicRMW = lazy (NativeLibrary.getFunction<LLVMBuildAtomicRMWDelegate> "LLVMBuildAtomicRMW")
+let llvmBuildAtomicCmpXchg = lazy (NativeLibrary.getFunction<LLVMBuildAtomicCmpXchgDelegate> "LLVMBuildAtomicCmpXchg")
+
+// Atomic helpers
+let llvmIsAtomicSingleThread = lazy (NativeLibrary.getFunction<LLVMIsAtomicSingleThreadDelegate> "LLVMIsAtomicSingleThread")
+let llvmSetAtomicSingleThread = lazy (NativeLibrary.getFunction<LLVMSetAtomicSingleThreadDelegate> "LLVMSetAtomicSingleThread")
+
+// PHI Node Functions
+let llvmAddIncoming = lazy (NativeLibrary.getFunction<LLVMAddIncomingDelegate> "LLVMAddIncoming")
+let llvmCountIncoming = lazy (NativeLibrary.getFunction<LLVMCountIncomingDelegate> "LLVMCountIncoming")
+let llvmGetIncomingValue = lazy (NativeLibrary.getFunction<LLVMGetIncomingValueDelegate> "LLVMGetIncomingValue")
+let llvmGetIncomingBlock = lazy (NativeLibrary.getFunction<LLVMGetIncomingBlockDelegate> "LLVMGetIncomingBlock")
+
+// Instruction Functions
+let llvmHasMetadata = lazy (NativeLibrary.getFunction<LLVMHasMetadataDelegate> "LLVMHasMetadata")
+let llvmGetMetadata = lazy (NativeLibrary.getFunction<LLVMGetMetadataDelegate> "LLVMGetMetadata")
+let llvmSetMetadata = lazy (NativeLibrary.getFunction<LLVMSetMetadataDelegate> "LLVMSetMetadata")
+let llvmGetInstructionParent = lazy (NativeLibrary.getFunction<LLVMGetInstructionParentDelegate> "LLVMGetInstructionParent")
+let llvmGetNextInstruction = lazy (NativeLibrary.getFunction<LLVMGetNextInstructionDelegate> "LLVMGetNextInstruction")
+let llvmGetPreviousInstruction = lazy (NativeLibrary.getFunction<LLVMGetPreviousInstructionDelegate> "LLVMGetPreviousInstruction")
+let llvmInstructionRemoveFromParent = lazy (NativeLibrary.getFunction<LLVMInstructionRemoveFromParentDelegate> "LLVMInstructionRemoveFromParent")
+let llvmInstructionEraseFromParent = lazy (NativeLibrary.getFunction<LLVMInstructionEraseFromParentDelegate> "LLVMInstructionEraseFromParent")
+let llvmDeleteInstruction = lazy (NativeLibrary.getFunction<LLVMDeleteInstructionDelegate> "LLVMDeleteInstruction")
+let llvmGetInstructionOpcode = lazy (NativeLibrary.getFunction<LLVMGetInstructionOpcodeDelegate> "LLVMGetInstructionOpcode")
+let llvmGetICmpPredicate = lazy (NativeLibrary.getFunction<LLVMGetICmpPredicateDelegate> "LLVMGetICmpPredicate")
+let llvmGetFCmpPredicate = lazy (NativeLibrary.getFunction<LLVMGetFCmpPredicateDelegate> "LLVMGetFCmpPredicate")
+let llvmInstructionClone = lazy (NativeLibrary.getFunction<LLVMInstructionCloneDelegate> "LLVMInstructionClone")
+
+// Call site functions
+let llvmGetNumArgOperands = lazy (NativeLibrary.getFunction<LLVMGetNumArgOperandsDelegate> "LLVMGetNumArgOperands")
+let llvmSetInstructionCallConv = lazy (NativeLibrary.getFunction<LLVMSetInstructionCallConvDelegate> "LLVMSetInstructionCallConv")
+let llvmGetInstructionCallConv = lazy (NativeLibrary.getFunction<LLVMGetInstructionCallConvDelegate> "LLVMGetInstructionCallConv")
+let llvmGetCalledFunctionType = lazy (NativeLibrary.getFunction<LLVMGetCalledFunctionTypeDelegate> "LLVMGetCalledFunctionType")
+let llvmGetCalledValue = lazy (NativeLibrary.getFunction<LLVMGetCalledValueDelegate> "LLVMGetCalledValue")
+let llvmIsTailCall = lazy (NativeLibrary.getFunction<LLVMIsTailCallDelegate> "LLVMIsTailCall")
+let llvmSetTailCall = lazy (NativeLibrary.getFunction<LLVMSetTailCallDelegate> "LLVMSetTailCall")
+
+// Terminator functions
+let llvmGetNumSuccessors = lazy (NativeLibrary.getFunction<LLVMGetNumSuccessorsDelegate> "LLVMGetNumSuccessors")
+let llvmGetSuccessor = lazy (NativeLibrary.getFunction<LLVMGetSuccessorDelegate> "LLVMGetSuccessor")
+let llvmSetSuccessor = lazy (NativeLibrary.getFunction<LLVMSetSuccessorDelegate> "LLVMSetSuccessor")
+let llvmIsConditional = lazy (NativeLibrary.getFunction<LLVMIsConditionalDelegate> "LLVMIsConditional")
+let llvmGetCondition = lazy (NativeLibrary.getFunction<LLVMGetConditionDelegate> "LLVMGetCondition")
+let llvmSetCondition = lazy (NativeLibrary.getFunction<LLVMSetConditionDelegate> "LLVMSetCondition")
+let llvmGetSwitchDefaultDest = lazy (NativeLibrary.getFunction<LLVMGetSwitchDefaultDestDelegate> "LLVMGetSwitchDefaultDest")
+
+// Alloca functions
+let llvmGetAllocatedType = lazy (NativeLibrary.getFunction<LLVMGetAllocatedTypeDelegate> "LLVMGetAllocatedType")
+
+// GEP functions
+let llvmIsInBounds = lazy (NativeLibrary.getFunction<LLVMIsInBoundsDelegate> "LLVMIsInBounds")
+let llvmSetIsInBounds = lazy (NativeLibrary.getFunction<LLVMSetIsInBoundsDelegate> "LLVMSetIsInBounds")
+let llvmGetGEPSourceElementType = lazy (NativeLibrary.getFunction<LLVMGetGEPSourceElementTypeDelegate> "LLVMGetGEPSourceElementType")
+
+// Extract/Insert value functions
+let llvmGetNumIndices = lazy (NativeLibrary.getFunction<LLVMGetNumIndicesDelegate> "LLVMGetNumIndices")
+let llvmGetIndices = lazy (NativeLibrary.getFunction<LLVMGetIndicesDelegate> "LLVMGetIndices")
+
+// Pass Manager Functions
+let llvmCreatePassManager = lazy (NativeLibrary.getFunction<LLVMCreatePassManagerDelegate> "LLVMCreatePassManager")
+let llvmCreateFunctionPassManagerForModule = lazy (NativeLibrary.getFunction<LLVMCreateFunctionPassManagerForModuleDelegate> "LLVMCreateFunctionPassManagerForModule")
+let llvmRunPassManager = lazy (NativeLibrary.getFunction<LLVMRunPassManagerDelegate> "LLVMRunPassManager")
+let llvmInitializeFunctionPassManager = lazy (NativeLibrary.getFunction<LLVMInitializeFunctionPassManagerDelegate> "LLVMInitializeFunctionPassManager")
+let llvmRunFunctionPassManager = lazy (NativeLibrary.getFunction<LLVMRunFunctionPassManagerDelegate> "LLVMRunFunctionPassManager")
+let llvmFinalizeFunctionPassManager = lazy (NativeLibrary.getFunction<LLVMFinalizeFunctionPassManagerDelegate> "LLVMFinalizeFunctionPassManager")
+let llvmDisposePassManager = lazy (NativeLibrary.getFunction<LLVMDisposePassManagerDelegate> "LLVMDisposePassManager")
+
+// Optimization Passes
+let llvmAddInstructionCombiningPass = lazy (NativeLibrary.getFunction<LLVMAddInstructionCombiningPassDelegate> "LLVMAddInstructionCombiningPass")
+let llvmAddPromoteMemoryToRegisterPass = lazy (NativeLibrary.getFunction<LLVMAddPromoteMemoryToRegisterPassDelegate> "LLVMAddPromoteMemoryToRegisterPass")
+let llvmAddGVNPass = lazy (NativeLibrary.getFunction<LLVMAddGVNPassDelegate> "LLVMAddGVNPass")
+let llvmAddCFGSimplificationPass = lazy (NativeLibrary.getFunction<LLVMAddCFGSimplificationPassDelegate> "LLVMAddCFGSimplificationPass")
+
+// Target Functions
+let llvmGetDefaultTargetTriple = lazy (NativeLibrary.getFunction<LLVMGetDefaultTargetTripleDelegate> "LLVMGetDefaultTargetTriple")
+let llvmGetHostCPUName = lazy (NativeLibrary.getFunction<LLVMGetHostCPUNameDelegate> "LLVMGetHostCPUName")
+let llvmGetHostCPUFeatures = lazy (NativeLibrary.getFunction<LLVMGetHostCPUFeaturesDelegate> "LLVMGetHostCPUFeatures")
+let llvmInitializeNativeTarget = lazy (NativeLibrary.getFunction<LLVMInitializeNativeTargetDelegate> "LLVMInitializeNativeTarget")
+let llvmInitializeNativeAsmPrinter = lazy (NativeLibrary.getFunction<LLVMInitializeNativeAsmPrinterDelegate> "LLVMInitializeNativeAsmPrinter")
+let llvmGetTargetFromTriple = lazy (NativeLibrary.getFunction<LLVMGetTargetFromTripleDelegate> "LLVMGetTargetFromTriple")
+let llvmGetTargetFromName = lazy (NativeLibrary.getFunction<LLVMGetTargetFromNameDelegate> "LLVMGetTargetFromName")
+let llvmGetTargetName = lazy (NativeLibrary.getFunction<LLVMGetTargetNameDelegate> "LLVMGetTargetName")
+let llvmGetTargetDescription = lazy (NativeLibrary.getFunction<LLVMGetTargetDescriptionDelegate> "LLVMGetTargetDescription")
+let llvmTargetHasJIT = lazy (NativeLibrary.getFunction<LLVMTargetHasJITDelegate> "LLVMTargetHasJIT")
+let llvmTargetHasTargetMachine = lazy (NativeLibrary.getFunction<LLVMTargetHasTargetMachineDelegate> "LLVMTargetHasTargetMachine")
+let llvmTargetHasAsmBackend = lazy (NativeLibrary.getFunction<LLVMTargetHasAsmBackendDelegate> "LLVMTargetHasAsmBackend")
+let llvmCreateTargetMachine = lazy (NativeLibrary.getFunction<LLVMCreateTargetMachineDelegate> "LLVMCreateTargetMachine")
+let llvmDisposeTargetMachine = lazy (NativeLibrary.getFunction<LLVMDisposeTargetMachineDelegate> "LLVMDisposeTargetMachine")
+let llvmGetTargetMachineTarget = lazy (NativeLibrary.getFunction<LLVMGetTargetMachineTargetDelegate> "LLVMGetTargetMachineTarget")
+let llvmGetTargetMachineTriple = lazy (NativeLibrary.getFunction<LLVMGetTargetMachineTripleDelegate> "LLVMGetTargetMachineTriple")
+let llvmGetTargetMachineCPU = lazy (NativeLibrary.getFunction<LLVMGetTargetMachineCPUDelegate> "LLVMGetTargetMachineCPU")
+let llvmGetTargetMachineFeatureString = lazy (NativeLibrary.getFunction<LLVMGetTargetMachineFeatureStringDelegate> "LLVMGetTargetMachineFeatureString")
+let llvmCreateTargetDataLayout = lazy (NativeLibrary.getFunction<LLVMCreateTargetDataLayoutDelegate> "LLVMCreateTargetDataLayout")
+let llvmTargetMachineEmitToFile = lazy (NativeLibrary.getFunction<LLVMTargetMachineEmitToFileDelegate> "LLVMTargetMachineEmitToFile")
+let llvmTargetMachineEmitToMemoryBuffer = lazy (NativeLibrary.getFunction<LLVMTargetMachineEmitToMemoryBufferDelegate> "LLVMTargetMachineEmitToMemoryBuffer")
+
+// Target Data Functions
+let llvmGetModuleDataLayout = lazy (NativeLibrary.getFunction<LLVMGetModuleDataLayoutDelegate> "LLVMGetModuleDataLayout")
+let llvmSetModuleDataLayout = lazy (NativeLibrary.getFunction<LLVMSetModuleDataLayoutDelegate> "LLVMSetModuleDataLayout")
+let llvmCreateTargetData = lazy (NativeLibrary.getFunction<LLVMCreateTargetDataDelegate> "LLVMCreateTargetData")
+let llvmDisposeTargetData = lazy (NativeLibrary.getFunction<LLVMDisposeTargetDataDelegate> "LLVMDisposeTargetData")
+let llvmCopyStringRepOfTargetData = lazy (NativeLibrary.getFunction<LLVMCopyStringRepOfTargetDataDelegate> "LLVMCopyStringRepOfTargetData")
+let llvmPointerSize = lazy (NativeLibrary.getFunction<LLVMPointerSizeDelegate> "LLVMPointerSize")
+let llvmPointerSizeForAS = lazy (NativeLibrary.getFunction<LLVMPointerSizeForASDelegate> "LLVMPointerSizeForAS")
+let llvmIntPtrType = lazy (NativeLibrary.getFunction<LLVMIntPtrTypeDelegate> "LLVMIntPtrType")
+let llvmIntPtrTypeForAS = lazy (NativeLibrary.getFunction<LLVMIntPtrTypeForASDelegate> "LLVMIntPtrTypeForAS")
+let llvmIntPtrTypeInContext = lazy (NativeLibrary.getFunction<LLVMIntPtrTypeInContextDelegate> "LLVMIntPtrTypeInContext")
+let llvmIntPtrTypeForASInContext = lazy (NativeLibrary.getFunction<LLVMIntPtrTypeForASInContextDelegate> "LLVMIntPtrTypeForASInContext")
+let llvmSizeOfTypeInBits = lazy (NativeLibrary.getFunction<LLVMSizeOfTypeInBitsDelegate> "LLVMSizeOfTypeInBits")
+let llvmStoreSizeOfType = lazy (NativeLibrary.getFunction<LLVMStoreSizeOfTypeDelegate> "LLVMStoreSizeOfType")
+let llvmABISizeOfType = lazy (NativeLibrary.getFunction<LLVMABISizeOfTypeDelegate> "LLVMABISizeOfType")
+let llvmABIAlignmentOfType = lazy (NativeLibrary.getFunction<LLVMABIAlignmentOfTypeDelegate> "LLVMABIAlignmentOfType")
+let llvmCallFrameAlignmentOfType = lazy (NativeLibrary.getFunction<LLVMCallFrameAlignmentOfTypeDelegate> "LLVMCallFrameAlignmentOfType")
+let llvmPreferredAlignmentOfType = lazy (NativeLibrary.getFunction<LLVMPreferredAlignmentOfTypeDelegate> "LLVMPreferredAlignmentOfType")
+let llvmPreferredAlignmentOfGlobal = lazy (NativeLibrary.getFunction<LLVMPreferredAlignmentOfGlobalDelegate> "LLVMPreferredAlignmentOfGlobal")
+let llvmElementAtOffset = lazy (NativeLibrary.getFunction<LLVMElementAtOffsetDelegate> "LLVMElementAtOffset")
+let llvmOffsetOfElement = lazy (NativeLibrary.getFunction<LLVMOffsetOfElementDelegate> "LLVMOffsetOfElement")
+
+// Initialization Functions
+let llvmInitializeAllTargetInfos = lazy (NativeLibrary.getFunction<LLVMInitializeAllTargetInfosDelegate> "LLVMInitializeAllTargetInfos")
+let llvmInitializeAllTargets = lazy (NativeLibrary.getFunction<LLVMInitializeAllTargetsDelegate> "LLVMInitializeAllTargets")
+let llvmInitializeAllTargetMCs = lazy (NativeLibrary.getFunction<LLVMInitializeAllTargetMCsDelegate> "LLVMInitializeAllTargetMCs")
+let llvmInitializeAllAsmPrinters = lazy (NativeLibrary.getFunction<LLVMInitializeAllAsmPrintersDelegate> "LLVMInitializeAllAsmPrinters")
+let llvmInitializeAllAsmParsers = lazy (NativeLibrary.getFunction<LLVMInitializeAllAsmParsersDelegate> "LLVMInitializeAllAsmParsers")
+let llvmInitializeAllDisassemblers = lazy (NativeLibrary.getFunction<LLVMInitializeAllDisassemblersDelegate> "LLVMInitializeAllDisassemblers")
+
+// Memory Management Functions
+let llvmDisposeMessage = lazy (NativeLibrary.getFunction<LLVMDisposeMessageDelegate> "LLVMDisposeMessage")
+let llvmShutdown = lazy (NativeLibrary.getFunction<LLVMShutdownDelegate> "LLVMShutdown")
+
+// Version Functions
+let llvmGetVersion = lazy (NativeLibrary.getFunction<LLVMGetVersionDelegate> "LLVMGetVersion")
+
+// Error Handling
+let llvmCreateMessage = lazy (NativeLibrary.getFunction<LLVMCreateMessageDelegate> "LLVMCreateMessage")
+
+// New Pass Manager Functions (PassBuilder)
+let llvmRunPasses = lazy (NativeLibrary.getFunction<LLVMRunPassesDelegate> "LLVMRunPasses")
+let llvmRunPassesOnFunction = lazy (NativeLibrary.getFunction<LLVMRunPassesOnFunctionDelegate> "LLVMRunPassesOnFunction")
+let llvmCreatePassBuilderOptions = lazy (NativeLibrary.getFunction<LLVMCreatePassBuilderOptionsDelegate> "LLVMCreatePassBuilderOptions")
+let llvmPassBuilderOptionsSetVerifyEach = lazy (NativeLibrary.getFunction<LLVMPassBuilderOptionsSetVerifyEachDelegate> "LLVMPassBuilderOptionsSetVerifyEach")
+let llvmPassBuilderOptionsSetDebugLogging = lazy (NativeLibrary.getFunction<LLVMPassBuilderOptionsSetDebugLoggingDelegate> "LLVMPassBuilderOptionsSetDebugLogging")
+let llvmDisposePassBuilderOptions = lazy (NativeLibrary.getFunction<LLVMDisposePassBuilderOptionsDelegate> "LLVMDisposePassBuilderOptions")
+
+// Memory Buffer Functions
+let llvmCreateMemoryBufferWithContentsOfFile = lazy (NativeLibrary.getFunction<LLVMCreateMemoryBufferWithContentsOfFileDelegate> "LLVMCreateMemoryBufferWithContentsOfFile")
+let llvmCreateMemoryBufferWithSTDIN = lazy (NativeLibrary.getFunction<LLVMCreateMemoryBufferWithSTDINDelegate> "LLVMCreateMemoryBufferWithSTDIN")
+let llvmCreateMemoryBufferWithMemoryRange = lazy (NativeLibrary.getFunction<LLVMCreateMemoryBufferWithMemoryRangeDelegate> "LLVMCreateMemoryBufferWithMemoryRange")
+let llvmCreateMemoryBufferWithMemoryRangeCopy = lazy (NativeLibrary.getFunction<LLVMCreateMemoryBufferWithMemoryRangeCopyDelegate> "LLVMCreateMemoryBufferWithMemoryRangeCopy")
+let llvmGetBufferStart = lazy (NativeLibrary.getFunction<LLVMGetBufferStartDelegate> "LLVMGetBufferStart")
+let llvmGetBufferSize = lazy (NativeLibrary.getFunction<LLVMGetBufferSizeDelegate> "LLVMGetBufferSize")
+let llvmDisposeMemoryBuffer = lazy (NativeLibrary.getFunction<LLVMDisposeMemoryBufferDelegate> "LLVMDisposeMemoryBuffer")
 
 // =============================================================================
-// LLVM Initialization Functions
+// Helper Functions
 // =============================================================================
 
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMInitializeAllTargetInfos()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMInitializeAllTargets()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMInitializeAllTargetMCs()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMInitializeAllAsmPrinters()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMInitializeAllAsmParsers()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMInitializeAllDisassemblers()
-
-// =============================================================================
-// LLVM Memory Management Functions
-// =============================================================================
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMDisposeMessage(nativeint Message)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMShutdown()
-
-// =============================================================================
-// LLVM Version Functions
-// =============================================================================
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMGetVersion(nativeint Major, nativeint Minor, nativeint Patch)
-
-// =============================================================================
-// LLVM Error Handling
-// =============================================================================
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMCreateMessage([<MarshalAs(UnmanagedType.LPStr)>] string Message)
-
-// =============================================================================
-// LLVM New Pass Manager Functions (PassBuilder)
-// =============================================================================
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMErrorRef LLVMRunPasses(LLVMModuleRef M, [<MarshalAs(UnmanagedType.LPStr)>] string Passes, LLVMTargetMachineRef TM, LLVMPassBuilderOptionsRef Options)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMErrorRef LLVMRunPassesOnFunction(LLVMValueRef F, [<MarshalAs(UnmanagedType.LPStr)>] string Passes, LLVMTargetMachineRef TM, LLVMPassBuilderOptionsRef Options)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMPassBuilderOptionsRef LLVMCreatePassBuilderOptions()
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMPassBuilderOptionsSetVerifyEach(LLVMPassBuilderOptionsRef Options, LLVMBool VerifyEach)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMPassBuilderOptionsSetDebugLogging(LLVMPassBuilderOptionsRef Options, LLVMBool DebugLogging)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMDisposePassBuilderOptions(LLVMPassBuilderOptionsRef Options)
-
-// =============================================================================
-// LLVM Memory Buffer Functions  
-// =============================================================================
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMCreateMemoryBufferWithContentsOfFile([<MarshalAs(UnmanagedType.LPStr)>] string Path, nativeint OutMemBuf, nativeint OutMessage)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMBool LLVMCreateMemoryBufferWithSTDIN(nativeint OutMemBuf, nativeint OutMessage)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMMemoryBufferRef LLVMCreateMemoryBufferWithMemoryRange([<MarshalAs(UnmanagedType.LPStr)>] string InputData, uint32 InputDataLength, [<MarshalAs(UnmanagedType.LPStr)>] string BufferName, LLVMBool RequiresNullTerminator)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern LLVMMemoryBufferRef LLVMCreateMemoryBufferWithMemoryRangeCopy([<MarshalAs(UnmanagedType.LPStr)>] string InputData, uint32 InputDataLength, [<MarshalAs(UnmanagedType.LPStr)>] string BufferName)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern nativeint LLVMGetBufferStart(LLVMMemoryBufferRef MemBuf)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern uint32 LLVMGetBufferSize(LLVMMemoryBufferRef MemBuf)
-
-[<DllImport(libraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void LLVMDisposeMemoryBuffer(LLVMMemoryBufferRef MemBuf)
-
-// =============================================================================
-// Helper Functions for F# Integration
-// =============================================================================
-
-/// Get string from target triple pointer, handling disposal
-let LLVMGetDefaultTargetTripleString() : string =
-    try
-        let ptr = LLVMGetDefaultTargetTriple()
-        if ptr = nativeint 0 then
-            "unknown-unknown-unknown"
-        else
-            let result = Marshal.PtrToStringAnsi(ptr)
-            LLVMDisposeMessage(ptr)
-            if String.IsNullOrEmpty(result) then "unknown-unknown-unknown" else result
-    with
-    | ex ->
-        printfn "Error getting default target triple: %s" ex.Message
-        "unknown-unknown-unknown"
-
-/// Get string from host CPU name pointer, handling disposal
-let LLVMGetHostCPUNameString() : string =
-    try
-        let ptr = LLVMGetHostCPUName()
-        if ptr = nativeint 0 then
-            "generic"
-        else
-            let result = Marshal.PtrToStringAnsi(ptr)
-            LLVMDisposeMessage(ptr)
-            if String.IsNullOrEmpty(result) then "generic" else result
-    with
-    | ex ->
-        printfn "Error getting host CPU name: %s" ex.Message
-        "generic"
-
-/// Get string from host CPU features pointer, handling disposal
-let LLVMGetHostCPUFeaturesString() : string =
-    try
-        let ptr = LLVMGetHostCPUFeatures()
-        if ptr = nativeint 0 then
-            ""
-        else
-            let result = Marshal.PtrToStringAnsi(ptr)
-            LLVMDisposeMessage(ptr)
-            if String.IsNullOrEmpty(result) then "" else result
-    with
-    | ex ->
-        printfn "Error getting host CPU features: %s" ex.Message
-        ""
-
-/// Initialize LLVM with comprehensive error handling
-let LLVMInitializeAllSafe() : bool =
-    try
-        printfn "Initializing LLVM targets..."
-        LLVMInitializeAllTargetInfos()
-        LLVMInitializeAllTargets()
-        LLVMInitializeAllTargetMCs()
-        LLVMInitializeAllAsmPrinters()
-        
-        let nativeTargetResult = LLVMInitializeNativeTarget()
-        let asmPrinterResult = LLVMInitializeNativeAsmPrinter()
-        
-        printfn "LLVM initialization results: NativeTarget=%d, AsmPrinter=%d" nativeTargetResult asmPrinterResult
-        nativeTargetResult = 0 && asmPrinterResult = 0
-    with
-    | ex ->
-        printfn "Error during LLVM initialization: %s" ex.Message
-        printfn "Exception type: %s" (ex.GetType().Name)
-        if ex.InnerException <> null then
-            printfn "Inner exception: %s" ex.InnerException.Message
-        false
-
-/// Test LLVM availability with detailed error reporting
-let LLVMTestAvailability() : bool =
-    try
-        printfn "Testing LLVM library availability..."
-        
-        // Test basic context creation
-        let context = LLVMContextCreate()
-        if context = nativeint 0 then
-            printfn "Failed to create LLVM context"
-            false
-        else
-            printfn "✓ LLVM context creation successful"
-            
-            // Test module creation
-            let testModule = LLVMModuleCreateWithNameInContext("test_module", context)
-            if testModule = nativeint 0 then
-                printfn "Failed to create LLVM module"
-                LLVMContextDispose(context)
-                false
-            else
-                printfn "✓ LLVM module creation successful"
-                
-                // Test target triple retrieval
-                let triple = LLVMGetDefaultTargetTripleString()
-                printfn "✓ Target triple: %s" triple
-                
-                // Clean up
-                LLVMDisposeModule(testModule)
-                LLVMContextDispose(context)
-                
-                triple <> "unknown-unknown-unknown"
-    with
-    | ex ->
-        printfn "LLVM availability test failed: %s" ex.Message
-        printfn "Stack trace: %s" ex.StackTrace
-        false
-
-/// Create a function type with parameter types
-let LLVMCreateFunctionType (returnType: LLVMTypeRef) (paramTypes: LLVMTypeRef[]) (isVarArg: bool) : LLVMTypeRef =
-    let paramCount = uint32 paramTypes.Length
-    let isVarArgBool = if isVarArg then 1 else 0
-    
-    if paramTypes.Length = 0 then
-        LLVMFunctionType(returnType, nativeint 0, 0u, isVarArgBool)
-    else
-        let paramTypesPtr = Marshal.AllocHGlobal(nativeint (paramTypes.Length * sizeof<nativeint>))
-        try
-            for i = 0 to paramTypes.Length - 1 do
-                Marshal.WriteIntPtr(paramTypesPtr, i * sizeof<nativeint>, paramTypes.[i])
-            
-            LLVMFunctionType(returnType, paramTypesPtr, paramCount, isVarArgBool)
-        finally
-            Marshal.FreeHGlobal(paramTypesPtr)
-
-/// Safe wrapper for getting target from triple
-let LLVMGetTargetFromTripleSafe (triple: string) : Result<LLVMTargetRef, string> =
-    try
-        let targetPtr = Marshal.AllocHGlobal(sizeof<nativeint>)
-        let errorPtr = Marshal.AllocHGlobal(sizeof<nativeint>)
-        
-        try
-            let result = LLVMGetTargetFromTriple(triple, targetPtr, errorPtr)
-            
-            if result <> 0 then
-                let errorMsgPtr = Marshal.ReadIntPtr(errorPtr)
-                if errorMsgPtr <> nativeint 0 then
-                    let errorMsg = Marshal.PtrToStringAnsi(errorMsgPtr)
-                    LLVMDisposeMessage(errorMsgPtr)
-                    Error(sprintf "Failed to get target for triple '%s': %s" triple errorMsg)
-                else
-                    Error(sprintf "Failed to get target for triple '%s': Unknown error" triple)
-            else
-                let target = Marshal.ReadIntPtr(targetPtr)
-                Ok(target)
-        finally
-            Marshal.FreeHGlobal(targetPtr)
-            Marshal.FreeHGlobal(errorPtr)
-    with
-    | ex ->
-        Error(sprintf "Exception getting target from triple '%s': %s" triple ex.Message)
-
-/// Build a call instruction with proper argument marshaling
-let LLVMBuildCall2Safe (builder: LLVMBuilderRef) (fnType: LLVMTypeRef) (fn: LLVMValueRef) (args: LLVMValueRef[]) (name: string) : LLVMValueRef =
-    let numArgs = uint32 args.Length
-    
-    if args.Length = 0 then
-        LLVMBuildCall2(builder, fnType, fn, nativeint 0, 0u, name)
-    else
-        let argsPtr = Marshal.AllocHGlobal(nativeint (args.Length * sizeof<nativeint>))
-        try
-            for i = 0 to args.Length - 1 do
-                Marshal.WriteIntPtr(argsPtr, i * sizeof<nativeint>, args.[i])
-            
-            LLVMBuildCall2(builder, fnType, fn, argsPtr, numArgs, name)
-        finally
-            Marshal.FreeHGlobal(argsPtr)
-
-/// Build GEP instruction with proper index marshaling
-let LLVMBuildGEP2Safe (builder: LLVMBuilderRef) (ty: LLVMTypeRef) (pointer: LLVMValueRef) (indices: LLVMValueRef[]) (name: string) : LLVMValueRef =
-    let numIndices = uint32 indices.Length
-    
-    if indices.Length = 0 then
-        LLVMBuildGEP2(builder, ty, pointer, nativeint 0, 0u, name)
-    else
-        let indicesPtr = Marshal.AllocHGlobal(nativeint (indices.Length * sizeof<nativeint>))
-        try
-            for i = 0 to indices.Length - 1 do
-                Marshal.WriteIntPtr(indicesPtr, i * sizeof<nativeint>, indices.[i])
-            
-            LLVMBuildGEP2(builder, ty, pointer, indicesPtr, numIndices, name)
-        finally
-            Marshal.FreeHGlobal(indicesPtr)
-
-/// Add incoming values to PHI node with proper marshaling
-let LLVMAddIncomingSafe (phiNode: LLVMValueRef) (incomingValues: LLVMValueRef[]) (incomingBlocks: LLVMBasicBlockRef[]) : unit =
-    if incomingValues.Length <> incomingBlocks.Length then
-        invalidArg "incomingValues/incomingBlocks" "Arrays must have the same length"
-    
-    let count = uint32 incomingValues.Length
-    
-    if incomingValues.Length > 0 then
-        let valuesPtr = Marshal.AllocHGlobal(nativeint (incomingValues.Length * sizeof<nativeint>))
-        let blocksPtr = Marshal.AllocHGlobal(nativeint (incomingBlocks.Length * sizeof<nativeint>))
-        
-        try
-            for i = 0 to incomingValues.Length - 1 do
-                Marshal.WriteIntPtr(valuesPtr, i * sizeof<nativeint>, incomingValues.[i])
-                Marshal.WriteIntPtr(blocksPtr, i * sizeof<nativeint>, incomingBlocks.[i])
-            
-            LLVMAddIncoming(phiNode, valuesPtr, blocksPtr, count)
-        finally
-            Marshal.FreeHGlobal(valuesPtr)
-            Marshal.FreeHGlobal(blocksPtr)
-
-/// Create struct type with proper marshaling
-let LLVMCreateStructType (context: LLVMContextRef) (elementTypes: LLVMTypeRef[]) (packed: bool) : LLVMTypeRef =
-    let elementCount = uint32 elementTypes.Length
-    let packedBool = if packed then 1 else 0
-    
-    if elementTypes.Length = 0 then
-        LLVMStructTypeInContext(context, nativeint 0, 0u, packedBool)
-    else
-        let elemTypesPtr = Marshal.AllocHGlobal(nativeint (elementTypes.Length * sizeof<nativeint>))
-        try
-            for i = 0 to elementTypes.Length - 1 do
-                Marshal.WriteIntPtr(elemTypesPtr, i * sizeof<nativeint>, elementTypes.[i])
-            
-            LLVMStructTypeInContext(context, elemTypesPtr, elementCount, packedBool)
-        finally
-            Marshal.FreeHGlobal(elemTypesPtr)
-
-/// Create array constant with proper marshaling
-let LLVMCreateConstantArray (elementType: LLVMTypeRef) (constantValues: LLVMValueRef[]) : LLVMValueRef =
-    let length = uint32 constantValues.Length
-    
-    if constantValues.Length = 0 then
-        LLVMConstArray(elementType, nativeint 0, 0u)
-    else
-        let valuesPtr = Marshal.AllocHGlobal(nativeint (constantValues.Length * sizeof<nativeint>))
-        try
-            for i = 0 to constantValues.Length - 1 do
-                Marshal.WriteIntPtr(valuesPtr, i * sizeof<nativeint>, constantValues.[i])
-            
-            LLVMConstArray(elementType, valuesPtr, length)
-        finally
-            Marshal.FreeHGlobal(valuesPtr)
-
-/// Create vector constant with proper marshaling
-let LLVMCreateConstantVector (scalarConstants: LLVMValueRef[]) : LLVMValueRef =
-    let size = uint32 scalarConstants.Length
-    
-    if scalarConstants.Length = 0 then
-        LLVMConstVector(nativeint 0, 0u)
-    else
-        let valuesPtr = Marshal.AllocHGlobal(nativeint (scalarConstants.Length * sizeof<nativeint>))
-        try
-            for i = 0 to scalarConstants.Length - 1 do
-                Marshal.WriteIntPtr(valuesPtr, i * sizeof<nativeint>, scalarConstants.[i])
-            
-            LLVMConstVector(valuesPtr, size)
-        finally
-            Marshal.FreeHGlobal(valuesPtr)
-
-/// Get string from LLVM string pointer with safe disposal
-let LLVMGetStringAndDispose (ptr: nativeint) : string =
-    if ptr = nativeint 0 then
-        ""
-    else
-        try
-            let result = Marshal.PtrToStringAnsi(ptr)
-            LLVMDisposeMessage(ptr)
-            if result = null then "" else result
-        with
-        | ex ->
-            printfn "Error converting LLVM string: %s" ex.Message
-            ""
-
-/// Safe module verification with error message handling
-let LLVMVerifyModuleSafe (moduleRef: LLVMModuleRef) : Result<unit, string> =
-    try
-        let errorPtr = Marshal.AllocHGlobal(sizeof<nativeint>)
-        try
-            let result = LLVMVerifyModule(moduleRef, LLVMVerifierFailureAction.ReturnStatus, errorPtr)
-            if result <> 0 then
-                let errorMsgPtr = Marshal.ReadIntPtr(errorPtr)
-                if errorMsgPtr <> nativeint 0 then
-                    let errorMsg = Marshal.PtrToStringAnsi(errorMsgPtr)
-                    LLVMDisposeMessage(errorMsgPtr)
-                    Error(errorMsg)
-                else
-                    Error("Module verification failed with unknown error")
-            else
-                Ok(())
-        finally
-            Marshal.FreeHGlobal(errorPtr)
-    with
-    | ex ->
-        Error(sprintf "Exception during module verification: %s" ex.Message)
-
-/// Safe target machine creation for Fidelity compiler
-let LLVMCreateTargetMachineSafe (triple: string) (cpu: string) (features: string) (optLevel: LLVMCodeGenOptLevel) (relocMode: LLVMRelocMode) (codeModel: LLVMCodeModel) : Result<LLVMTargetMachineRef, string> =
-    match LLVMGetTargetFromTripleSafe(triple) with
-    | Error(err) -> Error(err)
-    | Ok(target) ->
-        try
-            let targetMachine = LLVMCreateTargetMachine(target, triple, cpu, features, optLevel, relocMode, codeModel)
-            if targetMachine = nativeint 0 then
-                Error("Failed to create target machine")
-            else
-                Ok(targetMachine)
-        with
-        | ex ->
-            Error(sprintf "Exception creating target machine: %s" ex.Message)
-
-/// Safe code generation to file for Fidelity compiler
-let LLVMEmitToFileSafe (targetMachine: LLVMTargetMachineRef) (moduleRef: LLVMModuleRef) (filename: string) (fileType: LLVMCodeGenFileType) : Result<unit, string> =
-    try
-        let errorPtr = Marshal.AllocHGlobal(sizeof<nativeint>)
-        try
-            let result = LLVMTargetMachineEmitToFile(targetMachine, moduleRef, filename, fileType, errorPtr)
-            if result <> 0 then
-                let errorMsgPtr = Marshal.ReadIntPtr(errorPtr)
-                if errorMsgPtr <> nativeint 0 then
-                    let errorMsg = Marshal.PtrToStringAnsi(errorMsgPtr)
-                    LLVMDisposeMessage(errorMsgPtr)
-                    Error(sprintf "Code generation failed: %s" errorMsg)
-                else
-                    Error("Code generation failed with unknown error")
-            else
-                Ok(())
-        finally
-            Marshal.FreeHGlobal(errorPtr)
-    with
-    | ex ->
-        Error(sprintf "Exception during code generation: %s" ex.Message)
-
-/// Comprehensive cleanup function for LLVM resources
-let LLVMCleanupResources (resources: (string * (unit -> unit)) list) : unit =
-    resources
-    |> List.rev  // Dispose in reverse order
-    |> List.iter (fun (name, dispose) ->
-        try
-            dispose()
-            printfn "✓ Disposed %s" name
-        with
-        | ex ->
-            printfn "✗ Error disposing %s: %s" name ex.Message)
-
-/// Create a complete compilation pipeline for Fidelity
-type FidelityLLVMPipeline = {
-    Context: LLVMContextRef
-    Module: LLVMModuleRef
-    Builder: LLVMBuilderRef
-    TargetMachine: LLVMTargetMachineRef option
-    PassManager: LLVMPassManagerRef option
-}
-
-/// Initialize a complete LLVM pipeline for Fidelity compiler
-let LLVMCreateFidelityPipeline (moduleName: string) (targetTriple: string option) : Result<FidelityLLVMPipeline, string> =
-    try
-        // Initialize LLVM
-        if not (LLVMInitializeAllSafe()) then
-            Error("Failed to initialize LLVM")
-        else
-            let context = LLVMContextCreate()
-            if context = nativeint 0 then
-                Error("Failed to create LLVM context")
-            else
-                let moduleRef = LLVMModuleCreateWithNameInContext(moduleName, context)
-                if moduleRef = nativeint 0 then
-                    LLVMContextDispose(context)
-                    Error("Failed to create LLVM module")
-                else
-                    let builder = LLVMCreateBuilderInContext(context)
-                    if builder = nativeint 0 then
-                        LLVMDisposeModule(moduleRef)
-                        LLVMContextDispose(context)
-                        Error("Failed to create LLVM builder")
-                    else
-                        // Set target triple
-                        let triple = 
-                            match targetTriple with
-                            | Some(t) -> t
-                            | None -> LLVMGetDefaultTargetTripleString()
-                        
-                        LLVMSetTarget(moduleRef, triple)
-                        
-                        // Optionally create target machine
-                        let targetMachineResult = 
-                            match LLVMCreateTargetMachineSafe(triple, "generic", "", LLVMCodeGenOptLevel.Default, LLVMRelocMode.Default, LLVMCodeModel.Default) with
-                            | Ok(tm) -> 
-                                // Set data layout from target machine
-                                let dataLayout = LLVMCreateTargetDataLayout(tm)
-                                LLVMSetModuleDataLayout(moduleRef, dataLayout)
-                                LLVMDisposeTargetData(dataLayout)
-                                Some(tm)
-                            | Error(_) -> None
-                        
-                        Ok({
-                            Context = context
-                            Module = moduleRef
-                            Builder = builder
-                            TargetMachine = targetMachineResult
-                            PassManager = None
-                        })
-    with
-    | ex ->
-        Error(sprintf "Exception creating Fidelity pipeline: %s" ex.Message)
-
-/// Dispose of a Fidelity LLVM pipeline
-let LLVMDisposeFidelityPipeline (pipeline: FidelityLLVMPipeline) : unit =
-    let resources = [
-        ("Pass Manager", fun () -> 
-            match pipeline.PassManager with 
-            | Some(pm) -> LLVMDisposePassManager(pm) 
-            | None -> ())
-        ("Target Machine", fun () -> 
-            match pipeline.TargetMachine with 
-            | Some(tm) -> LLVMDisposeTargetMachine(tm) 
-            | None -> ())
-        ("Builder", fun () -> LLVMDisposeBuilder(pipeline.Builder))
-        ("Module", fun () -> LLVMDisposeModule(pipeline.Module))
-        ("Context", fun () -> LLVMContextDispose(pipeline.Context))
-    ]
-    LLVMCleanupResources(resources)
+/// Convenience function to invoke lazy-loaded functions
+let inline invoke (lazyFunc: Lazy<'T>) = lazyFunc.Value
