@@ -27,7 +27,6 @@ open FSharpMLIR.PlatformUtils
 module FSharpParser =
     open FSharp.Compiler.Syntax
     open FSharp.Reflection
-    open System
 
     /// <summary>
     /// Parse F# code to AST
@@ -68,87 +67,23 @@ module FSharpParser =
                 |> Array.iter (fun diag -> printfn "%s" diag.Message)
                 None
             else
-                // Manual extraction of modules using reflection
-                try
-                    // Get the ParseTree property
-                    let parseTree = parseFileResults.ParseTree
-                    
-                    // Print the type for diagnostics
-                    printfn "ParseTree type: %s" (parseTree.GetType().FullName)
-                    
-                    // Check if the property is null
-                    if parseTree = null then
-                        printfn "Parse tree is null"
-                        None
-                    else
-                        // Now we need to extract modules from the parse tree
-                        // Use reflection to navigate through the object structure
-                        
-                        // First, try to check if it's the ImplFile case
-                        let parseTreeType = parseTree.GetType()
-                        
-                        if parseTreeType.Name.EndsWith("ParsedInput") then
-                            // For discriminated unions, we can use FSharpValue.GetUnionFields
-                            let caseInfo, values = FSharpValue.GetUnionFields(parseTree, parseTreeType)
-                            
-                            printfn "Union case: %s" caseInfo.Name
-                            
-                            // Check if this is the ImplFile case
-                            if caseInfo.Name = "ImplFile" && values.Length > 0 then
-                                // Get the ParsedImplFileInput from the case
-                                let implFile = values.[0]
-                                
-                                // Now extract modules from the ParsedImplFileInput
-                                // ParsedImplFileInput is a record type
-                                let implFileType = implFile.GetType()
-                                printfn "ImplFile type: %s" implFileType.FullName
-                                
-                                // Get all fields
-                                let fieldsInfo = FSharpValue.GetRecordFields(implFile)
-                                printfn "ImplFile has %d fields" fieldsInfo.Length
-                                
-                                // Modules should be one of these fields
-                                // Try to find the field that contains a list of SynModuleOrNamespace
-                                let mutable moduleField = null
-                                for i = 0 to fieldsInfo.Length - 1 do
-                                    let field = fieldsInfo.[i]
-                                    printfn "Field %d type: %s" i (field.GetType().FullName)
-                                    
-                                    // Check if this field is a list of SynModuleOrNamespace
-                                    match field with
-                                    | :? list<SynModuleOrNamespace> as modules ->
-                                        moduleField <- modules
-                                    | _ -> ()
-                                
-                                // If we found the modules, return the first one
-                                if moduleField <> null then
-                                    List.tryHead (moduleField :?> list<SynModuleOrNamespace>)
-                                else
-                                    // Try a more direct approach - assume the modules are at index 5
-                                    if fieldsInfo.Length > 5 then
-                                        try
-                                            let possibleModules = fieldsInfo.[5]
-                                            match possibleModules with
-                                            | :? list<SynModuleOrNamespace> as modules ->
-                                                List.tryHead modules
-                                            | _ ->
-                                                printfn "Field at index 5 is not a list of SynModuleOrNamespace"
-                                                None
-                                        with ex ->
-                                            printfn "Error accessing field at index 5: %s" ex.Message
-                                            None
-                                    else
-                                        printfn "Not enough fields in ParsedImplFileInput"
-                                        None
-                            else
-                                printfn "Not an ImplFile case or no values"
-                                None
-                        else
-                            printfn "Not a ParsedInput"
+                // Extract modules from parse tree
+                match parseFileResults.ParseTree with
+                | Some parseTree ->
+                    match parseTree with
+                    | ParsedInput.ImplFile(ParsedImplFileInput(_, _, _, _, _, modules, _)) ->
+                        // Return the first module if available
+                        match modules with
+                        | [] -> 
+                            printfn "No modules found in parsed input"
                             None
-                with ex ->
-                    printfn "Error extracting modules: %s" ex.Message
-                    printfn "Stack trace: %s" ex.StackTrace
+                        | firstModule :: _ -> 
+                            Some firstModule
+                    | _ ->
+                        printfn "Not an implementation file"
+                        None
+                | None ->
+                    printfn "Parse tree is empty"
                     None
         with ex ->
             printfn "Error parsing F# code: %s" ex.Message
