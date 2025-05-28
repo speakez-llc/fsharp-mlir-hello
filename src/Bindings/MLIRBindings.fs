@@ -1,10 +1,25 @@
 module FSharpMLIR.Bindings.MLIR
 
+open System
 open System.Runtime.InteropServices
 open FSharpMLIR.PlatformUtils
 
-// Ensure native environment is set up before any bindings are used
-do setupNativeEnvironment()
+// Note: setupNativeEnvironment() is now called explicitly by the compiler pipeline
+// This prevents crashes during module initialization
+
+// MLIR Opaque type handles
+type MLIRContext = nativeint
+type MLIRDialectRegistry = nativeint
+type MLIRLocation = nativeint
+type MLIRModule = nativeint
+type MLIROperation = nativeint
+type MLIRRegion = nativeint
+type MLIRBlock = nativeint
+type MLIRType = nativeint
+type MLIRAttribute = nativeint
+type MLIRValue = nativeint
+type MLIRPassManager = nativeint
+type MLIRNamedAttribute = nativeint
 
 // Float types
 type MLIRFloatTypeKind =
@@ -15,509 +30,167 @@ type MLIRFloatTypeKind =
     | F80 = 4
     | F128 = 5
 
-// MLIR Context - The central data structure
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirContextCreate()
+// MLIR Context Functions
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRContext mlirContextCreate()
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirContextDestroy(nativeint context)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void mlirContextDestroy(MLIRContext context)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirContextSetAllowUnregisteredDialects(nativeint context, bool allow)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void mlirContextSetAllowUnregisteredDialects(MLIRContext context, bool allow)
 
-// MLIR Locations - For error reporting
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirLocationUnknownGet(nativeint context)
+// MLIR Location Functions
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRLocation mlirLocationUnknownGet(MLIRContext context)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirLocationFileLineColGet(nativeint context, string filename, uint32 line, uint32 col)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRLocation mlirLocationFileLineColGet(MLIRContext context, [<MarshalAs(UnmanagedType.LPStr)>] string filename, uint32 line, uint32 col)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirLocationDestroy(nativeint location)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void mlirLocationDestroy(MLIRLocation location)
 
-// MLIR Modules - Top-level containers
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirModuleCreateEmpty(nativeint location)
+// MLIR Module Functions
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRModule mlirModuleCreateEmpty(MLIRLocation location)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirModuleDestroy(nativeint moduleHandle)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void mlirModuleDestroy(MLIRModule moduleHandle)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirModuleGetOperation(nativeint module')
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIROperation mlirModuleGetOperation(MLIRModule module')
 
-// MLIR Operations
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirOperationCreate(
-    string name, 
-    nativeint location, 
+// MLIR Operation Functions
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIROperation mlirOperationCreate(
+    [<MarshalAs(UnmanagedType.LPStr)>] string name, 
+    MLIRLocation location, 
     uint32 numResults, 
-    nativeint[] resultTypes,
+    MLIRType[] resultTypes,
     uint32 numOperands, 
-    nativeint[] operands,
+    MLIRValue[] operands,
     uint32 numAttributes, 
-    nativeint[] attributes,
+    MLIRNamedAttribute[] attributes,
     uint32 numRegions, 
-    nativeint[] regions)
+    MLIRRegion[] regions)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirOperationDestroy(nativeint op)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void mlirOperationDestroy(MLIROperation op)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirOperationGetResult(nativeint op, uint32 pos)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRValue mlirOperationGetResult(MLIROperation op, uint32 pos)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirOperationSetAttributeByName(nativeint op, string name, nativeint attribute)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void mlirOperationSetAttributeByName(MLIROperation op, [<MarshalAs(UnmanagedType.LPStr)>] string name, MLIRAttribute attribute)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern bool mlirOperationVerify(nativeint op)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern bool mlirOperationVerify(MLIROperation op)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirOperationGetAttributeByName(nativeint op, string name)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRAttribute mlirOperationGetAttributeByName(MLIROperation op, [<MarshalAs(UnmanagedType.LPStr)>] string name)
 
-// MLIR Regions and Blocks
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirRegionCreate()
+// MLIR Region Functions
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRRegion mlirRegionCreate()
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirRegionDestroy(nativeint region)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void mlirRegionDestroy(MLIRRegion region)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirRegionGetFirstBlock(nativeint region)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRBlock mlirRegionGetFirstBlock(MLIRRegion region)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirRegionAppendOwnedBlock(nativeint region, nativeint block)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void mlirRegionAppendOwnedBlock(MLIRRegion region, MLIRBlock block)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirBlockCreate(uint32 numArguments, nativeint[] argumentTypes, nativeint[] argumentLocs)
+// MLIR Block Functions
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRBlock mlirBlockCreate(uint32 numArguments, MLIRType[] argumentTypes, MLIRLocation[] argumentLocs)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirBlockDestroy(nativeint block)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void mlirBlockDestroy(MLIRBlock block)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirBlockAppendOwnedOperation(nativeint block, nativeint operation)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void mlirBlockAppendOwnedOperation(MLIRBlock block, MLIROperation operation)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirBlockGetFirstOperation(nativeint block)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIROperation mlirBlockGetFirstOperation(MLIRBlock block)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirBlockGetTerminator(nativeint block)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIROperation mlirBlockGetTerminator(MLIRBlock block)
 
-// MLIR Types
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirIntegerTypeGet(nativeint context, uint32 width)
+// MLIR Type Functions
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRType mlirIntegerTypeGet(MLIRContext context, uint32 width)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirFloatTypeGet(nativeint context, MLIRFloatTypeKind kind)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRType mlirFloatTypeGet(MLIRContext context, MLIRFloatTypeKind kind)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirFunctionTypeGet(
-    nativeint context, 
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRType mlirFunctionTypeGet(
+    MLIRContext context, 
     uint32 numInputs, 
-    nativeint[] inputs, 
+    MLIRType[] inputs, 
     uint32 numResults, 
-    nativeint[] results)
+    MLIRType[] results)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirArrayTypeGet(nativeint elementType, uint32 size)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRType mlirArrayTypeGet(MLIRType elementType, uint32 size)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirStructTypeGet(nativeint context, uint32 numElements, nativeint[] elements, uint32 numNames, string[] names)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRType mlirStructTypeGet(MLIRContext context, uint32 numElements, MLIRType[] elements, uint32 numNames, [<MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPStr)>] string[] names)
 
-// MLIR Attributes
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirStringAttrGet(nativeint context, uint32 length, string value)
+// MLIR Attribute Functions
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRAttribute mlirStringAttrGet(MLIRContext context, uint32 length, [<MarshalAs(UnmanagedType.LPStr)>] string value)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirIntegerAttrGet(nativeint typeArg, int64 value)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRAttribute mlirIntegerAttrGet(MLIRType typeArg, int64 value)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirFloatAttrGet(nativeint typeArg, double value)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRAttribute mlirFloatAttrGet(MLIRType typeArg, double value)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirBoolAttrGet(nativeint context, bool value)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRAttribute mlirBoolAttrGet(MLIRContext context, bool value)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirTypeAttrGet(nativeint typeArg)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRAttribute mlirTypeAttrGet(MLIRType typeArg)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirBlockAttributeGet(nativeint block)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRAttribute mlirBlockAttributeGet(MLIRBlock block)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirNamedAttributeGet(nativeint name, nativeint attr)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRNamedAttribute mlirNamedAttributeGet(MLIRAttribute name, MLIRAttribute attr)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern string mlirStringAttributeGetValue(nativeint attr)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern string mlirStringAttributeGetValue(MLIRAttribute attr)
 
-// MLIR Dialects
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirDialectRegistryCreate()
+// MLIR Dialect Functions
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRDialectRegistry mlirDialectRegistryCreate()
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirDialectRegistryDestroy(nativeint registry)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void mlirDialectRegistryDestroy(MLIRDialectRegistry registry)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirContextAppendDialectRegistry(nativeint context, nativeint registry)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void mlirContextAppendDialectRegistry(MLIRContext context, MLIRDialectRegistry registry)
 
-// Register standard dialects
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirRegisterAllDialects(nativeint registry)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void mlirRegisterAllDialects(MLIRDialectRegistry registry)
 
-// Register specific dialects
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirRegisterStandardDialect(nativeint registry)
+// MLIR Pass Manager Functions
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern MLIRPassManager mlirPassManagerCreate(MLIRContext context)
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirRegisterLLVMDialect(nativeint registry)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void mlirPassManagerDestroy(MLIRPassManager passManager)
 
-// MLIR Printing
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirOperationPrint(nativeint operation, nativeint callback, nativeint userData)
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern bool mlirPassManagerRun(MLIRPassManager passManager, MLIRModule module')
 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirOperationDump(nativeint operation)
+// MLIR Printing Functions
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void mlirOperationDump(MLIROperation operation)
 
-// MLIR LLVM integration 
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirLLVMDialectDataLayoutGet(nativeint operation)
-
-// MLIR to LLVM conversion
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern bool mlirTranslateModuleToLLVMIR(nativeint module', nativeint llvmModule, nativeint callback, nativeint userData)
-
-// Pass management
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint mlirPassManagerCreate(nativeint context)
-
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirPassManagerDestroy(nativeint passManager)
-
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern bool mlirPassManagerRun(nativeint passManager, nativeint module')
-
-// Standard passes
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirPassManagerAddCanonicalizer(nativeint passManager)
-
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirPassManagerAddCSE(nativeint passManager)
-
-#if WINDOWS
-[<DllImport("MLIR.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libMLIR.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void mlirPassManagerAddLowerToLLVM(nativeint passManager)
+// MLIR to LLVM Conversion
+[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern bool mlirTranslateModuleToLLVMIR(MLIRModule module', nativeint llvmModule, nativeint callback, nativeint userData)

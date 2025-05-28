@@ -1,10 +1,11 @@
 module FSharpMLIR.Bindings.LLVM
 
+open System
 open System.Runtime.InteropServices
 open FSharpMLIR.PlatformUtils
 
-// Ensure native environment is set up before any bindings are used
-do setupNativeEnvironment()
+// Note: setupNativeEnvironment() is now called explicitly by the compiler pipeline
+// This prevents crashes during module initialization
 
 // Code generation optimization levels
 type LLVMCodeGenOptLevel =
@@ -47,501 +48,191 @@ type LLVMVerifierFailureAction =
 // Boolean type for LLVM (uses int32 internally)
 type LLVMBool = int32
 
-// LLVM Context - Fixed signatures
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint LLVMContextCreate()
+// LLVM Opaque type handles
+type LLVMContextRef = nativeint
+type LLVMModuleRef = nativeint
+type LLVMTypeRef = nativeint
+type LLVMValueRef = nativeint
+type LLVMBasicBlockRef = nativeint
+type LLVMBuilderRef = nativeint
+type LLVMPassManagerRef = nativeint
+type LLVMTargetRef = nativeint
+type LLVMTargetMachineRef = nativeint
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void LLVMContextDispose(nativeint context)
+// LLVM Context Functions
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMContextRef LLVMContextCreate()
 
-// LLVM Modules
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint LLVMModuleCreateWithNameInContext(string moduleName, nativeint context)
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void LLVMContextDispose(LLVMContextRef context)
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void LLVMDisposeModule(nativeint moduleHandle)
+// LLVM Module Functions
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMModuleRef LLVMModuleCreateWithNameInContext([<MarshalAs(UnmanagedType.LPStr)>] string moduleName, LLVMContextRef context)
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void LLVMSetTarget(nativeint module', string triple)
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void LLVMDisposeModule(LLVMModuleRef moduleHandle)
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void LLVMSetDataLayout(nativeint module', string dataLayout)
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void LLVMSetTarget(LLVMModuleRef module', [<MarshalAs(UnmanagedType.LPStr)>] string triple)
 
-// LLVM Types
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint LLVMInt32TypeInContext(nativeint context)
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void LLVMSetDataLayout(LLVMModuleRef module', [<MarshalAs(UnmanagedType.LPStr)>] string dataLayout)
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint LLVMPointerType(nativeint elementType, uint32 addressSpace)
+// LLVM Type Functions
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMTypeRef LLVMInt32TypeInContext(LLVMContextRef context)
 
-// LLVM Functions
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint LLVMAddFunction(nativeint moduleHandle, string name, nativeint functionType)
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMTypeRef LLVMPointerType(LLVMTypeRef elementType, uint32 addressSpace)
 
-// LLVM Function Types
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint LLVMFunctionType(nativeint returnType, nativeint* paramTypes, uint32 paramCount, LLVMBool isVarArg)
+// LLVM Function Functions
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMValueRef LLVMAddFunction(LLVMModuleRef moduleHandle, [<MarshalAs(UnmanagedType.LPStr)>] string name, LLVMTypeRef functionType)
 
-// LLVM Basic Blocks
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint LLVMAppendBasicBlockInContext(nativeint context, nativeint func, string name)
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMTypeRef LLVMFunctionType(LLVMTypeRef returnType, nativeint paramTypes, uint32 paramCount, LLVMBool isVarArg)
 
-// LLVM Builder
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint LLVMCreateBuilderInContext(nativeint context)
+// LLVM Basic Block Functions
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMBasicBlockRef LLVMAppendBasicBlockInContext(LLVMContextRef context, LLVMValueRef func, [<MarshalAs(UnmanagedType.LPStr)>] string name)
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void LLVMPositionBuilderAtEnd(nativeint builder, nativeint basicBlock)
+// LLVM Builder Functions
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMBuilderRef LLVMCreateBuilderInContext(LLVMContextRef context)
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void LLVMDisposeBuilder(nativeint builder)
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void LLVMPositionBuilderAtEnd(LLVMBuilderRef builder, LLVMBasicBlockRef basicBlock)
 
-// LLVM Instruction Building
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint LLVMBuildRet(nativeint builder, nativeint value)
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void LLVMDisposeBuilder(LLVMBuilderRef builder)
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint LLVMBuildRetVoid(nativeint builder)
+// LLVM Instruction Building Functions
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMValueRef LLVMBuildRet(LLVMBuilderRef builder, LLVMValueRef value)
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint LLVMBuildCall2(nativeint builder, nativeint functionType, nativeint func, nativeint* args, uint32 numArgs, string name)
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMValueRef LLVMBuildRetVoid(LLVMBuilderRef builder)
 
-// LLVM Constants
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint LLVMConstInt(nativeint intType, uint64 value, LLVMBool signExtend)
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMValueRef LLVMBuildCall2(LLVMBuilderRef builder, LLVMTypeRef functionType, LLVMValueRef func, nativeint args, uint32 numArgs, [<MarshalAs(UnmanagedType.LPStr)>] string name)
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint LLVMConstReal(nativeint realType, double value)
+// LLVM Constant Functions
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMValueRef LLVMConstInt(LLVMTypeRef intType, uint64 value, LLVMBool signExtend)
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint LLVMConstString(string str, uint32 length, LLVMBool dontNullTerminate)
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMValueRef LLVMConstReal(LLVMTypeRef realType, double value)
 
-// LLVM Target Machine - CORRECTED FUNCTION SIGNATURES
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMValueRef LLVMConstString([<MarshalAs(UnmanagedType.LPStr)>] string str, uint32 length, LLVMBool dontNullTerminate)
+
+// LLVM Target Functions
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
 extern nativeint LLVMGetDefaultTargetTriple()
 
-// CORRECTED: These functions return LLVMBool (int32), not int
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
 extern LLVMBool LLVMInitializeNativeTarget()
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
 extern LLVMBool LLVMInitializeNativeAsmPrinter()
 
-// Safe wrapper for LLVMInitializeNativeTarget
-let LLVMInitializeNativeTargetSafe() : bool =
-    try
-        let result = LLVMInitializeNativeTarget()
-        result = 0 // LLVM returns 0 for success
-    with
-    | ex ->
-        printfn "Error calling LLVMInitializeNativeTarget: %s" ex.Message
-        printfn "Exception type: %s" (ex.GetType().Name)
-        if ex.InnerException <> null then
-            printfn "Inner exception: %s" ex.InnerException.Message
-        false
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMBool LLVMGetTargetFromTriple([<MarshalAs(UnmanagedType.LPStr)>] string triple, nativeint target, nativeint errorMessage)
 
-// Safe wrapper for LLVMInitializeNativeAsmPrinter
-let LLVMInitializeNativeAsmPrinterSafe() : bool =
-    try
-        let result = LLVMInitializeNativeAsmPrinter()
-        result = 0 // LLVM returns 0 for success
-    with
-    | ex ->
-        printfn "Error calling LLVMInitializeNativeAsmPrinter: %s" ex.Message
-        printfn "Exception type: %s" (ex.GetType().Name)
-        if ex.InnerException <> null then
-            printfn "Inner exception: %s" ex.InnerException.Message
-        false
-
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern LLVMBool LLVMGetTargetFromTriple(string triple, nativeint* target, nativeint* errorMessage)
-
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint LLVMCreateTargetMachine(
-    nativeint target,
-    string triple,
-    string cpu,
-    string features,
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMTargetMachineRef LLVMCreateTargetMachine(
+    LLVMTargetRef target,
+    [<MarshalAs(UnmanagedType.LPStr)>] string triple,
+    [<MarshalAs(UnmanagedType.LPStr)>] string cpu,
+    [<MarshalAs(UnmanagedType.LPStr)>] string features,
     LLVMCodeGenOptLevel level,
     LLVMRelocMode reloc,
     LLVMCodeModel codeModel)
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void LLVMDisposeTargetMachine(nativeint targetMachine)
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void LLVMDisposeTargetMachine(LLVMTargetMachineRef targetMachine)
 
-// LLVM Write to file
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern LLVMBool LLVMPrintModuleToFile(nativeint moduleHandle, string filename, nativeint* errorMsg)
+// LLVM Module Output Functions
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMBool LLVMPrintModuleToFile(LLVMModuleRef moduleHandle, [<MarshalAs(UnmanagedType.LPStr)>] string filename, nativeint errorMsg)
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern LLVMBool LLVMTargetMachineEmitToFileRaw(
-    nativeint targetMachine,
-    nativeint module',
-    string filename,
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMBool LLVMTargetMachineEmitToFile(
+    LLVMTargetMachineRef targetMachine,
+    LLVMModuleRef module',
+    [<MarshalAs(UnmanagedType.LPStr)>] string filename,
     LLVMCodeGenFileType fileType,
-    nativeint* errorMessage)
+    nativeint errorMessage)
 
-// Safe wrapper for LLVMTargetMachineEmitToFile
-let LLVMTargetMachineEmitToFile(targetMachine: nativeint, module': nativeint, filename: string, fileType: LLVMCodeGenFileType, errorMessage: nativeint nativeptr) : bool =
-    try
-        let result = LLVMTargetMachineEmitToFileRaw(targetMachine, module', filename, fileType, errorMessage)
-        result = 0 // LLVM returns 0 for success
-    with
-    | ex ->
-        printfn "Error calling LLVMTargetMachineEmitToFile: %s" ex.Message
-        printfn "Exception type: %s" (ex.GetType().Name)
-        if ex.InnerException <> null then
-            printfn "Inner exception: %s" ex.InnerException.Message
-        false
-
-// String cleanup
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
+// LLVM Memory Management
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
 extern void LLVMDisposeMessage(nativeint message)
 
-// Verification - CORRECTED return type
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern LLVMBool LLVMVerifyModuleRaw(nativeint module', LLVMVerifierFailureAction action, nativeint* outMessage)
+// LLVM Module Verification
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMBool LLVMVerifyModule(LLVMModuleRef module', LLVMVerifierFailureAction action, nativeint outMessage)
 
-// Safe wrapper for LLVMVerifyModule
-let LLVMVerifyModule(module': nativeint, action: LLVMVerifierFailureAction, outMessage: nativeint nativeptr) : bool =
-    try
-        let result = LLVMVerifyModuleRaw(module', action, outMessage)
-        result <> 0 // For verification, non-zero means error
-    with
-    | ex ->
-        printfn "Error calling LLVMVerifyModule: %s" ex.Message
-        printfn "Exception type: %s" (ex.GetType().Name)
-        if ex.InnerException <> null then
-            printfn "Inner exception: %s" ex.InnerException.Message
-        true // Assume error if we can't verify
+// LLVM Pass Manager Functions
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMPassManagerRef LLVMCreatePassManager()
 
-// LLVM Pass Manager
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern nativeint LLVMCreatePassManager()
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void LLVMDisposePassManager(LLVMPassManagerRef pm)
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void LLVMDisposePassManager(nativeint pm)
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern LLVMBool LLVMRunPassManager(LLVMPassManagerRef pm, LLVMModuleRef m)
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern LLVMBool LLVMRunPassManagerRaw(nativeint pm, nativeint m)
+// LLVM Optimization Pass Functions
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void LLVMAddInstructionCombiningPass(LLVMPassManagerRef pm)
 
-// Safe wrapper for LLVMRunPassManager
-let LLVMRunPassManager(pm: nativeint, m: nativeint) : bool =
-    try
-        let result = LLVMRunPassManagerRaw(pm, m)
-        result <> 0 // Non-zero indicates changes were made (success)
-    with
-    | ex ->
-        printfn "Error calling LLVMRunPassManager: %s" ex.Message
-        printfn "Exception type: %s" (ex.GetType().Name)
-        if ex.InnerException <> null then
-            printfn "Inner exception: %s" ex.InnerException.Message
-        false
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void LLVMAddPromoteMemoryToRegisterPass(LLVMPassManagerRef pm)
 
-// Common optimization passes
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void LLVMAddInstructionCombiningPass(nativeint pm)
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void LLVMAddGVNPass(LLVMPassManagerRef pm)
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void LLVMAddPromoteMemoryToRegisterPass(nativeint pm)
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
+extern void LLVMAddCFGSimplificationPass(LLVMPassManagerRef pm)
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void LLVMAddGVNPass(nativeint pm)
-
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern void LLVMAddCFGSimplificationPass(nativeint pm)
-
-// Get string from target triple with enhanced safety
-let LLVMGetDefaultTargetTripleString() : string =
-    try
-        let ptr = LLVMGetDefaultTargetTriple()
-        if ptr = nativeint 0 then
-            "unknown-unknown-unknown"
-        else
-            let result = System.Runtime.InteropServices.Marshal.PtrToStringAnsi(ptr)
-            LLVMDisposeMessage(ptr) // Clean up the string
-            if System.String.IsNullOrEmpty(result) then "unknown-unknown-unknown" else result
-    with
-    | ex ->
-        printfn "Error getting default target triple: %s" ex.Message
-        printfn "Exception type: %s" (ex.GetType().Name)
-        if ex.InnerException <> null then
-            printfn "Inner exception: %s" ex.InnerException.Message
-        "unknown-unknown-unknown"
-
-// Additional initialization functions that may be needed
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
+// LLVM Initialization Functions
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
 extern void LLVMInitializeAllTargetInfos()
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
 extern void LLVMInitializeAllTargets()
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
 extern void LLVMInitializeAllTargetMCs()
 
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
 extern void LLVMInitializeAllAsmPrinters()
+
+// Get string from target triple
+let LLVMGetDefaultTargetTripleString() : string =
+    let ptr = LLVMGetDefaultTargetTriple()
+    if ptr = nativeint 0 then
+        "unknown-unknown-unknown"
+    else
+        let result = Marshal.PtrToStringAnsi(ptr)
+        LLVMDisposeMessage(ptr)
+        if String.IsNullOrEmpty(result) then "unknown-unknown-unknown" else result
 
 // Enhanced initialization function
 let LLVMInitializeAllSafe() : bool =
     try
-        printfn "Initializing all LLVM targets and components..."
+        printfn "Initializing LLVM targets..."
         LLVMInitializeAllTargetInfos()
         LLVMInitializeAllTargets()
         LLVMInitializeAllTargetMCs()
         LLVMInitializeAllAsmPrinters()
         
-        let nativeTargetResult = LLVMInitializeNativeTargetSafe()
-        let asmPrinterResult = LLVMInitializeNativeAsmPrinterSafe()
+        let nativeTargetResult = LLVMInitializeNativeTarget()
+        let asmPrinterResult = LLVMInitializeNativeAsmPrinter()
         
-        printfn "LLVM initialization complete: NativeTarget=%b, AsmPrinter=%b" nativeTargetResult asmPrinterResult
-        nativeTargetResult && asmPrinterResult
+        printfn "LLVM initialization results: NativeTarget=%d, AsmPrinter=%d" nativeTargetResult asmPrinterResult
+        nativeTargetResult = 0 && asmPrinterResult = 0
     with
     | ex ->
         printfn "Error during LLVM initialization: %s" ex.Message
