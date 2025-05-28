@@ -266,40 +266,52 @@ module private NativeLibrary =
         | PlatformOS.Linux -> "libLLVM.so"
         | _ -> "libLLVM.so"
     
+    // Windows DLL import functions
+    [<DllImport("kernel32.dll", SetLastError = true)>]
+    extern nativeint private LoadLibraryWindows(string lpFileName)
+    
+    [<DllImport("kernel32.dll", SetLastError = true)>]
+    extern nativeint private GetProcAddressWindows(nativeint hModule, string lpProcName)
+    
+    // Unix/Linux/macOS dynamic library functions
+    [<DllImport("libdl.dylib", SetLastError = true)>]
+    extern nativeint private dlopenMacOS(string filename, int flags)
+    
+    [<DllImport("libdl.dylib", SetLastError = true)>]
+    extern nativeint private dlsymMacOS(nativeint handle, string symbol)
+    
+    [<DllImport("libdl.so.2", SetLastError = true)>]
+    extern nativeint private dlopenLinux(string filename, int flags)
+    
+    [<DllImport("libdl.so.2", SetLastError = true)>]
+    extern nativeint private dlsymLinux(nativeint handle, string symbol)
+    
+    let private RTLD_LAZY = 1
+    
     let private libraryHandle = 
         lazy (
             let libName = getLibraryName()
             let handle = 
-                if Environment.OSVersion.Platform = PlatformID.Win32NT then
-                    LoadLibrary(libName)
-                else
-                    dlopen(libName, 1) // RTLD_LAZY
+                match getOS() with
+                | PlatformOS.Windows -> LoadLibraryWindows(libName)
+                | PlatformOS.MacOS -> dlopenMacOS(libName, RTLD_LAZY)
+                | PlatformOS.Linux -> dlopenLinux(libName, RTLD_LAZY)
+                | _ -> dlopenLinux(libName, RTLD_LAZY)
             
-            if handle = nativeint.Zero then
+            if handle = nativeint 0 then
                 failwithf "Failed to load LLVM library: %s" libName
             handle
         )
     
-    [<DllImport("kernel32.dll", SetLastError = true)>]
-    extern nativeint LoadLibrary(string lpFileName)
-    
-    [<DllImport("kernel32.dll", SetLastError = true)>]
-    extern nativeint GetProcAddress(nativeint hModule, string lpProcName)
-    
-    [<DllImport("libdl.so", SetLastError = true)>]
-    extern nativeint dlopen(string filename, int flags)
-    
-    [<DllImport("libdl.so", SetLastError = true)>]
-    extern nativeint dlsym(nativeint handle, string symbol)
-    
     let getFunction<'T> (name: string) : 'T =
         let funcPtr = 
-            if Environment.OSVersion.Platform = PlatformID.Win32NT then
-                GetProcAddress(libraryHandle.Value, name)
-            else
-                dlsym(libraryHandle.Value, name)
+            match getOS() with
+            | PlatformOS.Windows -> GetProcAddressWindows(libraryHandle.Value, name)
+            | PlatformOS.MacOS -> dlsymMacOS(libraryHandle.Value, name)
+            | PlatformOS.Linux -> dlsymLinux(libraryHandle.Value, name)
+            | _ -> dlsymLinux(libraryHandle.Value, name)
         
-        if funcPtr = nativeint.Zero then
+        if funcPtr = nativeint 0 then
             failwithf "Function %s not found in LLVM library" name
         
         Marshal.GetDelegateForFunctionPointer<'T>(funcPtr)
@@ -847,9 +859,51 @@ type LLVMGetBufferStartDelegate = delegate of LLVMMemoryBufferRef -> nativeint
 type LLVMGetBufferSizeDelegate = delegate of LLVMMemoryBufferRef -> uint32
 type LLVMDisposeMemoryBufferDelegate = delegate of LLVMMemoryBufferRef -> unit
 
+// Simplified API functions that don't require complex bindings for initial implementation
+type LLVMGetDefaultTargetTripleStringDelegate = delegate of unit -> string
+type LLVMContextCreateDelegate = delegate of unit -> nativeint
+type LLVMContextDisposeDelegate = delegate of nativeint -> unit
+type LLVMModuleCreateWithNameInContextDelegate = delegate of string * nativeint -> nativeint
+type LLVMDisposeModuleDelegate = delegate of nativeint -> unit
+type LLVMInitializeAllTargetsDelegate = delegate of unit -> unit
+type LLVMInitializeAllTargetInfosDelegate = delegate of unit -> unit
+type LLVMInitializeAllTargetMCsDelegate = delegate of unit -> unit
+type LLVMInitializeAllAsmPrintersDelegate = delegate of unit -> unit
+type LLVMInitializeNativeTargetDelegate = delegate of unit -> int
+type LLVMInitializeNativeAsmPrinterDelegate = delegate of unit -> int
+type LLVMSetDataLayoutDelegate = delegate of nativeint * string -> unit  
+type LLVMSetTargetDelegate = delegate of nativeint * string -> unit
+type LLVMVerifyModuleDelegate = delegate of nativeint * int * nativeint -> int
+type LLVMDisposeMessageDelegate = delegate of nativeint -> unit
+type LLVMGetTargetFromTripleDelegate = delegate of string * nativeint * nativeint -> int
+type LLVMCreateTargetMachineDelegate = delegate of nativeint * string * string * string * int * int * int -> nativeint
+type LLVMDisposeTargetMachineDelegate = delegate of nativeint -> unit
+type LLVMTargetMachineEmitToFileDelegate = delegate of nativeint * nativeint * string * int * nativeint -> int
+
 // =============================================================================
 // Lazy-loaded Function Instances
 // =============================================================================
+
+// Simple API functions for compiler pipeline
+let LLVMGetDefaultTargetTripleString = lazy (NativeLibrary.getFunction<LLVMGetDefaultTargetTripleStringDelegate> "LLVMGetDefaultTargetTriple")
+let LLVMContextCreate = lazy (NativeLibrary.getFunction<LLVMContextCreateDelegate> "LLVMContextCreate")
+let LLVMContextDispose = lazy (NativeLibrary.getFunction<LLVMContextDisposeDelegate> "LLVMContextDispose")
+let LLVMModuleCreateWithNameInContext = lazy (NativeLibrary.getFunction<LLVMModuleCreateWithNameInContextDelegate> "LLVMModuleCreateWithNameInContext")
+let LLVMDisposeModule = lazy (NativeLibrary.getFunction<LLVMDisposeModuleDelegate> "LLVMDisposeModule")
+let LLVMInitializeAllTargets = lazy (NativeLibrary.getFunction<LLVMInitializeAllTargetsDelegate> "LLVMInitializeAllTargets")
+let LLVMInitializeAllTargetInfos = lazy (NativeLibrary.getFunction<LLVMInitializeAllTargetInfosDelegate> "LLVMInitializeAllTargetInfos")
+let LLVMInitializeAllTargetMCs = lazy (NativeLibrary.getFunction<LLVMInitializeAllTargetMCsDelegate> "LLVMInitializeAllTargetMCs")
+let LLVMInitializeAllAsmPrinters = lazy (NativeLibrary.getFunction<LLVMInitializeAllAsmPrintersDelegate> "LLVMInitializeAllAsmPrinters")
+let LLVMInitializeNativeTarget = lazy (NativeLibrary.getFunction<LLVMInitializeNativeTargetDelegate> "LLVMInitializeNativeTarget")
+let LLVMInitializeNativeAsmPrinter = lazy (NativeLibrary.getFunction<LLVMInitializeNativeAsmPrinterDelegate> "LLVMInitializeNativeAsmPrinter")
+let LLVMSetDataLayout = lazy (NativeLibrary.getFunction<LLVMSetDataLayoutDelegate> "LLVMSetDataLayout")
+let LLVMSetTarget = lazy (NativeLibrary.getFunction<LLVMSetTargetDelegate> "LLVMSetTarget")
+let LLVMVerifyModule = lazy (NativeLibrary.getFunction<LLVMVerifyModuleDelegate> "LLVMVerifyModule")
+let LLVMDisposeMessage = lazy (NativeLibrary.getFunction<LLVMDisposeMessageDelegate> "LLVMDisposeMessage")
+let LLVMGetTargetFromTriple = lazy (NativeLibrary.getFunction<LLVMGetTargetFromTripleDelegate> "LLVMGetTargetFromTriple")
+let LLVMCreateTargetMachine = lazy (NativeLibrary.getFunction<LLVMCreateTargetMachineDelegate> "LLVMCreateTargetMachine")
+let LLVMDisposeTargetMachine = lazy (NativeLibrary.getFunction<LLVMDisposeTargetMachineDelegate> "LLVMDisposeTargetMachine")
+let LLVMTargetMachineEmitToFile = lazy (NativeLibrary.getFunction<LLVMTargetMachineEmitToFileDelegate> "LLVMTargetMachineEmitToFile")
 
 // Context Functions
 let llvmContextCreate = lazy (NativeLibrary.getFunction<LLVMContextCreateDelegate> "LLVMContextCreate")
@@ -1072,327 +1126,5 @@ let llvmGetNextParam = lazy (NativeLibrary.getFunction<LLVMGetNextParamDelegate>
 let llvmGetPreviousParam = lazy (NativeLibrary.getFunction<LLVMGetPreviousParamDelegate> "LLVMGetPreviousParam")
 let llvmSetParamAlignment = lazy (NativeLibrary.getFunction<LLVMSetParamAlignmentDelegate> "LLVMSetParamAlignment")
 
-// Basic Block Functions
-let llvmBasicBlockAsValue = lazy (NativeLibrary.getFunction<LLVMBasicBlockAsValueDelegate> "LLVMBasicBlockAsValue")
-let llvmValueIsBasicBlock = lazy (NativeLibrary.getFunction<LLVMValueIsBasicBlockDelegate> "LLVMValueIsBasicBlock")
-let llvmValueAsBasicBlock = lazy (NativeLibrary.getFunction<LLVMValueAsBasicBlockDelegate> "LLVMValueAsBasicBlock")
-let llvmGetBasicBlockName = lazy (NativeLibrary.getFunction<LLVMGetBasicBlockNameDelegate> "LLVMGetBasicBlockName")
-let llvmGetBasicBlockParent = lazy (NativeLibrary.getFunction<LLVMGetBasicBlockParentDelegate> "LLVMGetBasicBlockParent")
-let llvmGetBasicBlockTerminator = lazy (NativeLibrary.getFunction<LLVMGetBasicBlockTerminatorDelegate> "LLVMGetBasicBlockTerminator")
-let llvmCountBasicBlocks = lazy (NativeLibrary.getFunction<LLVMCountBasicBlocksDelegate> "LLVMCountBasicBlocks")
-let llvmGetBasicBlocks = lazy (NativeLibrary.getFunction<LLVMGetBasicBlocksDelegate> "LLVMGetBasicBlocks")
-let llvmGetFirstBasicBlock = lazy (NativeLibrary.getFunction<LLVMGetFirstBasicBlockDelegate> "LLVMGetFirstBasicBlock")
-let llvmGetLastBasicBlock = lazy (NativeLibrary.getFunction<LLVMGetLastBasicBlockDelegate> "LLVMGetLastBasicBlock")
-let llvmGetNextBasicBlock = lazy (NativeLibrary.getFunction<LLVMGetNextBasicBlockDelegate> "LLVMGetNextBasicBlock")
-let llvmGetPreviousBasicBlock = lazy (NativeLibrary.getFunction<LLVMGetPreviousBasicBlockDelegate> "LLVMGetPreviousBasicBlock")
-let llvmGetEntryBasicBlock = lazy (NativeLibrary.getFunction<LLVMGetEntryBasicBlockDelegate> "LLVMGetEntryBasicBlock")
-let llvmInsertExistingBasicBlockAfterInsertBlock = lazy (NativeLibrary.getFunction<LLVMInsertExistingBasicBlockAfterInsertBlockDelegate> "LLVMInsertExistingBasicBlockAfterInsertBlock")
-let llvmAppendExistingBasicBlock = lazy (NativeLibrary.getFunction<LLVMAppendExistingBasicBlockDelegate> "LLVMAppendExistingBasicBlock")
-let llvmCreateBasicBlockInContext = lazy (NativeLibrary.getFunction<LLVMCreateBasicBlockInContextDelegate> "LLVMCreateBasicBlockInContext")
-let llvmAppendBasicBlockInContext = lazy (NativeLibrary.getFunction<LLVMAppendBasicBlockInContextDelegate> "LLVMAppendBasicBlockInContext")
-let llvmAppendBasicBlock = lazy (NativeLibrary.getFunction<LLVMAppendBasicBlockDelegate> "LLVMAppendBasicBlock")
-let llvmInsertBasicBlockInContext = lazy (NativeLibrary.getFunction<LLVMInsertBasicBlockInContextDelegate> "LLVMInsertBasicBlockInContext")
-let llvmInsertBasicBlock = lazy (NativeLibrary.getFunction<LLVMInsertBasicBlockDelegate> "LLVMInsertBasicBlock")
-let llvmDeleteBasicBlock = lazy (NativeLibrary.getFunction<LLVMDeleteBasicBlockDelegate> "LLVMDeleteBasicBlock")
-let llvmRemoveBasicBlockFromParent = lazy (NativeLibrary.getFunction<LLVMRemoveBasicBlockFromParentDelegate> "LLVMRemoveBasicBlockFromParent")
-let llvmMoveBasicBlockBefore = lazy (NativeLibrary.getFunction<LLVMMoveBasicBlockBeforeDelegate> "LLVMMoveBasicBlockBefore")
-let llvmMoveBasicBlockAfter = lazy (NativeLibrary.getFunction<LLVMMoveBasicBlockAfterDelegate> "LLVMMoveBasicBlockAfter")
-let llvmGetFirstInstruction = lazy (NativeLibrary.getFunction<LLVMGetFirstInstructionDelegate> "LLVMGetFirstInstruction")
-let llvmGetLastInstruction = lazy (NativeLibrary.getFunction<LLVMGetLastInstructionDelegate> "LLVMGetLastInstruction")
-
-// Instruction Builder Functions
-let llvmCreateBuilderInContext = lazy (NativeLibrary.getFunction<LLVMCreateBuilderInContextDelegate> "LLVMCreateBuilderInContext")
-let llvmCreateBuilder = lazy (NativeLibrary.getFunction<LLVMCreateBuilderDelegate> "LLVMCreateBuilder")
-let llvmPositionBuilder = lazy (NativeLibrary.getFunction<LLVMPositionBuilderDelegate> "LLVMPositionBuilder")
-let llvmPositionBuilderBefore = lazy (NativeLibrary.getFunction<LLVMPositionBuilderBeforeDelegate> "LLVMPositionBuilderBefore")
-let llvmPositionBuilderAtEnd = lazy (NativeLibrary.getFunction<LLVMPositionBuilderAtEndDelegate> "LLVMPositionBuilderAtEnd")
-let llvmGetInsertBlock = lazy (NativeLibrary.getFunction<LLVMGetInsertBlockDelegate> "LLVMGetInsertBlock")
-let llvmClearInsertionPosition = lazy (NativeLibrary.getFunction<LLVMClearInsertionPositionDelegate> "LLVMClearInsertionPosition")
-let llvmInsertIntoBuilder = lazy (NativeLibrary.getFunction<LLVMInsertIntoBuilderDelegate> "LLVMInsertIntoBuilder")
-let llvmInsertIntoBuilderWithName = lazy (NativeLibrary.getFunction<LLVMInsertIntoBuilderWithNameDelegate> "LLVMInsertIntoBuilderWithName")
-let llvmDisposeBuilder = lazy (NativeLibrary.getFunction<LLVMDisposeBuilderDelegate> "LLVMDisposeBuilder")
-let llvmGetBuilderContext = lazy (NativeLibrary.getFunction<LLVMGetBuilderContextDelegate> "LLVMGetBuilderContext")
-
-// Metadata
-let llvmGetCurrentDebugLocation2 = lazy (NativeLibrary.getFunction<LLVMGetCurrentDebugLocation2Delegate> "LLVMGetCurrentDebugLocation2")
-let llvmSetCurrentDebugLocation2 = lazy (NativeLibrary.getFunction<LLVMSetCurrentDebugLocation2Delegate> "LLVMSetCurrentDebugLocation2")
-let llvmAddMetadataToInst = lazy (NativeLibrary.getFunction<LLVMAddMetadataToInstDelegate> "LLVMAddMetadataToInst")
-
-// Terminator Instructions
-let llvmBuildRetVoid = lazy (NativeLibrary.getFunction<LLVMBuildRetVoidDelegate> "LLVMBuildRetVoid")
-let llvmBuildRet = lazy (NativeLibrary.getFunction<LLVMBuildRetDelegate> "LLVMBuildRet")
-let llvmBuildAggregateRet = lazy (NativeLibrary.getFunction<LLVMBuildAggregateRetDelegate> "LLVMBuildAggregateRet")
-let llvmBuildBr = lazy (NativeLibrary.getFunction<LLVMBuildBrDelegate> "LLVMBuildBr")
-let llvmBuildCondBr = lazy (NativeLibrary.getFunction<LLVMBuildCondBrDelegate> "LLVMBuildCondBr")
-let llvmBuildSwitch = lazy (NativeLibrary.getFunction<LLVMBuildSwitchDelegate> "LLVMBuildSwitch")
-let llvmBuildIndirectBr = lazy (NativeLibrary.getFunction<LLVMBuildIndirectBrDelegate> "LLVMBuildIndirectBr")
-let llvmBuildInvoke2 = lazy (NativeLibrary.getFunction<LLVMBuildInvoke2Delegate> "LLVMBuildInvoke2")
-let llvmBuildUnreachable = lazy (NativeLibrary.getFunction<LLVMBuildUnreachableDelegate> "LLVMBuildUnreachable")
-
-// Exception Handling
-let llvmBuildResume = lazy (NativeLibrary.getFunction<LLVMBuildResumeDelegate> "LLVMBuildResume")
-let llvmBuildLandingPad = lazy (NativeLibrary.getFunction<LLVMBuildLandingPadDelegate> "LLVMBuildLandingPad")
-let llvmBuildCleanupRet = lazy (NativeLibrary.getFunction<LLVMBuildCleanupRetDelegate> "LLVMBuildCleanupRet")
-let llvmBuildCatchRet = lazy (NativeLibrary.getFunction<LLVMBuildCatchRetDelegate> "LLVMBuildCatchRet")
-let llvmBuildCatchPad = lazy (NativeLibrary.getFunction<LLVMBuildCatchPadDelegate> "LLVMBuildCatchPad")
-let llvmBuildCleanupPad = lazy (NativeLibrary.getFunction<LLVMBuildCleanupPadDelegate> "LLVMBuildCleanupPad")
-let llvmBuildCatchSwitch = lazy (NativeLibrary.getFunction<LLVMBuildCatchSwitchDelegate> "LLVMBuildCatchSwitch")
-
-// Control flow helpers
-let llvmAddCase = lazy (NativeLibrary.getFunction<LLVMAddCaseDelegate> "LLVMAddCase")
-let llvmAddDestination = lazy (NativeLibrary.getFunction<LLVMAddDestinationDelegate> "LLVMAddDestination")
-
-// Arithmetic Instructions
-let llvmBuildAdd = lazy (NativeLibrary.getFunction<LLVMBuildAddDelegate> "LLVMBuildAdd")
-let llvmBuildNSWAdd = lazy (NativeLibrary.getFunction<LLVMBuildNSWAddDelegate> "LLVMBuildNSWAdd")
-let llvmBuildNUWAdd = lazy (NativeLibrary.getFunction<LLVMBuildNUWAddDelegate> "LLVMBuildNUWAdd")
-let llvmBuildFAdd = lazy (NativeLibrary.getFunction<LLVMBuildFAddDelegate> "LLVMBuildFAdd")
-let llvmBuildSub = lazy (NativeLibrary.getFunction<LLVMBuildSubDelegate> "LLVMBuildSub")
-let llvmBuildNSWSub = lazy (NativeLibrary.getFunction<LLVMBuildNSWSubDelegate> "LLVMBuildNSWSub")
-let llvmBuildNUWSub = lazy (NativeLibrary.getFunction<LLVMBuildNUWSubDelegate> "LLVMBuildNUWSub")
-let llvmBuildFSub = lazy (NativeLibrary.getFunction<LLVMBuildFSubDelegate> "LLVMBuildFSub")
-let llvmBuildMul = lazy (NativeLibrary.getFunction<LLVMBuildMulDelegate> "LLVMBuildMul")
-let llvmBuildNSWMul = lazy (NativeLibrary.getFunction<LLVMBuildNSWMulDelegate> "LLVMBuildNSWMul")
-let llvmBuildNUWMul = lazy (NativeLibrary.getFunction<LLVMBuildNUWMulDelegate> "LLVMBuildNUWMul")
-let llvmBuildFMul = lazy (NativeLibrary.getFunction<LLVMBuildFMulDelegate> "LLVMBuildFMul")
-let llvmBuildUDiv = lazy (NativeLibrary.getFunction<LLVMBuildUDivDelegate> "LLVMBuildUDiv")
-let llvmBuildExactUDiv = lazy (NativeLibrary.getFunction<LLVMBuildExactUDivDelegate> "LLVMBuildExactUDiv")
-let llvmBuildSDiv = lazy (NativeLibrary.getFunction<LLVMBuildSDivDelegate> "LLVMBuildSDiv")
-let llvmBuildExactSDiv = lazy (NativeLibrary.getFunction<LLVMBuildExactSDivDelegate> "LLVMBuildExactSDiv")
-let llvmBuildFDiv = lazy (NativeLibrary.getFunction<LLVMBuildFDivDelegate> "LLVMBuildFDiv")
-let llvmBuildURem = lazy (NativeLibrary.getFunction<LLVMBuildURemDelegate> "LLVMBuildURem")
-let llvmBuildSRem = lazy (NativeLibrary.getFunction<LLVMBuildSRemDelegate> "LLVMBuildSRem")
-let llvmBuildFRem = lazy (NativeLibrary.getFunction<LLVMBuildFRemDelegate> "LLVMBuildFRem")
-let llvmBuildShl = lazy (NativeLibrary.getFunction<LLVMBuildShlDelegate> "LLVMBuildShl")
-let llvmBuildLShr = lazy (NativeLibrary.getFunction<LLVMBuildLShrDelegate> "LLVMBuildLShr")
-let llvmBuildAShr = lazy (NativeLibrary.getFunction<LLVMBuildAShrDelegate> "LLVMBuildAShr")
-let llvmBuildAnd = lazy (NativeLibrary.getFunction<LLVMBuildAndDelegate> "LLVMBuildAnd")
-let llvmBuildOr = lazy (NativeLibrary.getFunction<LLVMBuildOrDelegate> "LLVMBuildOr")
-let llvmBuildXor = lazy (NativeLibrary.getFunction<LLVMBuildXorDelegate> "LLVMBuildXor")
-let llvmBuildBinOp = lazy (NativeLibrary.getFunction<LLVMBuildBinOpDelegate> "LLVMBuildBinOp")
-let llvmBuildNeg = lazy (NativeLibrary.getFunction<LLVMBuildNegDelegate> "LLVMBuildNeg")
-let llvmBuildNSWNeg = lazy (NativeLibrary.getFunction<LLVMBuildNSWNegDelegate> "LLVMBuildNSWNeg")
-let llvmBuildFNeg = lazy (NativeLibrary.getFunction<LLVMBuildFNegDelegate> "LLVMBuildFNeg")
-let llvmBuildNot = lazy (NativeLibrary.getFunction<LLVMBuildNotDelegate> "LLVMBuildNot")
-
-// Arithmetic flags
-let llvmGetNUW = lazy (NativeLibrary.getFunction<LLVMGetNUWDelegate> "LLVMGetNUW")
-let llvmSetNUW = lazy (NativeLibrary.getFunction<LLVMSetNUWDelegate> "LLVMSetNUW")
-let llvmGetNSW = lazy (NativeLibrary.getFunction<LLVMGetNSWDelegate> "LLVMGetNSW")
-let llvmSetNSW = lazy (NativeLibrary.getFunction<LLVMSetNSWDelegate> "LLVMSetNSW")
-let llvmGetExact = lazy (NativeLibrary.getFunction<LLVMGetExactDelegate> "LLVMGetExact")
-let llvmSetExact = lazy (NativeLibrary.getFunction<LLVMSetExactDelegate> "LLVMSetExact")
-
-// Memory Instructions
-let llvmBuildAlloca = lazy (NativeLibrary.getFunction<LLVMBuildAllocaDelegate> "LLVMBuildAlloca")
-let llvmBuildArrayAlloca = lazy (NativeLibrary.getFunction<LLVMBuildArrayAllocaDelegate> "LLVMBuildArrayAlloca")
-let llvmBuildLoad2 = lazy (NativeLibrary.getFunction<LLVMBuildLoad2Delegate> "LLVMBuildLoad2")
-let llvmBuildStore = lazy (NativeLibrary.getFunction<LLVMBuildStoreDelegate> "LLVMBuildStore")
-let llvmBuildGEP2 = lazy (NativeLibrary.getFunction<LLVMBuildGEP2Delegate> "LLVMBuildGEP2")
-let llvmBuildInBoundsGEP2 = lazy (NativeLibrary.getFunction<LLVMBuildInBoundsGEP2Delegate> "LLVMBuildInBoundsGEP2")
-let llvmBuildStructGEP2 = lazy (NativeLibrary.getFunction<LLVMBuildStructGEP2Delegate> "LLVMBuildStructGEP2")
-let llvmBuildGlobalString = lazy (NativeLibrary.getFunction<LLVMBuildGlobalStringDelegate> "LLVMBuildGlobalString")
-let llvmBuildGlobalStringPtr = lazy (NativeLibrary.getFunction<LLVMBuildGlobalStringPtrDelegate> "LLVMBuildGlobalStringPtr")
-let llvmGetVolatile = lazy (NativeLibrary.getFunction<LLVMGetVolatileDelegate> "LLVMGetVolatile")
-let llvmSetVolatile = lazy (NativeLibrary.getFunction<LLVMSetVolatileDelegate> "LLVMSetVolatile")
-let llvmGetOrdering = lazy (NativeLibrary.getFunction<LLVMGetOrderingDelegate> "LLVMGetOrdering")
-let llvmSetOrdering = lazy (NativeLibrary.getFunction<LLVMSetOrderingDelegate> "LLVMSetOrdering")
-
-// Cast Instructions
-let llvmBuildTrunc = lazy (NativeLibrary.getFunction<LLVMBuildTruncDelegate> "LLVMBuildTrunc")
-let llvmBuildZExt = lazy (NativeLibrary.getFunction<LLVMBuildZExtDelegate> "LLVMBuildZExt")
-let llvmBuildSExt = lazy (NativeLibrary.getFunction<LLVMBuildSExtDelegate> "LLVMBuildSExt")
-let llvmBuildFPToUI = lazy (NativeLibrary.getFunction<LLVMBuildFPToUIDelegate> "LLVMBuildFPToUI")
-let llvmBuildFPToSI = lazy (NativeLibrary.getFunction<LLVMBuildFPToSIDelegate> "LLVMBuildFPToSI")
-let llvmBuildUIToFP = lazy (NativeLibrary.getFunction<LLVMBuildUIToFPDelegate> "LLVMBuildUIToFP")
-let llvmBuildSIToFP = lazy (NativeLibrary.getFunction<LLVMBuildSIToFPDelegate> "LLVMBuildSIToFP")
-let llvmBuildFPTrunc = lazy (NativeLibrary.getFunction<LLVMBuildFPTruncDelegate> "LLVMBuildFPTrunc")
-let llvmBuildFPExt = lazy (NativeLibrary.getFunction<LLVMBuildFPExtDelegate> "LLVMBuildFPExt")
-let llvmBuildPtrToInt = lazy (NativeLibrary.getFunction<LLVMBuildPtrToIntDelegate> "LLVMBuildPtrToInt")
-let llvmBuildIntToPtr = lazy (NativeLibrary.getFunction<LLVMBuildIntToPtrDelegate> "LLVMBuildIntToPtr")
-let llvmBuildBitCast = lazy (NativeLibrary.getFunction<LLVMBuildBitCastDelegate> "LLVMBuildBitCast")
-let llvmBuildAddrSpaceCast = lazy (NativeLibrary.getFunction<LLVMBuildAddrSpaceCastDelegate> "LLVMBuildAddrSpaceCast")
-let llvmBuildPointerCast = lazy (NativeLibrary.getFunction<LLVMBuildPointerCastDelegate> "LLVMBuildPointerCast")
-let llvmBuildIntCast2 = lazy (NativeLibrary.getFunction<LLVMBuildIntCast2Delegate> "LLVMBuildIntCast2")
-let llvmBuildFPCast = lazy (NativeLibrary.getFunction<LLVMBuildFPCastDelegate> "LLVMBuildFPCast")
-let llvmBuildCast = lazy (NativeLibrary.getFunction<LLVMBuildCastDelegate> "LLVMBuildCast")
-let llvmGetCastOpcode = lazy (NativeLibrary.getFunction<LLVMGetCastOpcodeDelegate> "LLVMGetCastOpcode")
-
-// Comparison Instructions
-let llvmBuildICmp = lazy (NativeLibrary.getFunction<LLVMBuildICmpDelegate> "LLVMBuildICmp")
-let llvmBuildFCmp = lazy (NativeLibrary.getFunction<LLVMBuildFCmpDelegate> "LLVMBuildFCmp")
-
-// Other Instructions
-let llvmBuildPhi = lazy (NativeLibrary.getFunction<LLVMBuildPhiDelegate> "LLVMBuildPhi")
-let llvmBuildCall2 = lazy (NativeLibrary.getFunction<LLVMBuildCall2Delegate> "LLVMBuildCall2")
-let llvmBuildSelect = lazy (NativeLibrary.getFunction<LLVMBuildSelectDelegate> "LLVMBuildSelect")
-let llvmBuildVAArg = lazy (NativeLibrary.getFunction<LLVMBuildVAArgDelegate> "LLVMBuildVAArg")
-let llvmBuildExtractElement = lazy (NativeLibrary.getFunction<LLVMBuildExtractElementDelegate> "LLVMBuildExtractElement")
-let llvmBuildInsertElement = lazy (NativeLibrary.getFunction<LLVMBuildInsertElementDelegate> "LLVMBuildInsertElement")
-let llvmBuildShuffleVector = lazy (NativeLibrary.getFunction<LLVMBuildShuffleVectorDelegate> "LLVMBuildShuffleVector")
-let llvmBuildExtractValue = lazy (NativeLibrary.getFunction<LLVMBuildExtractValueDelegate> "LLVMBuildExtractValue")
-let llvmBuildInsertValue = lazy (NativeLibrary.getFunction<LLVMBuildInsertValueDelegate> "LLVMBuildInsertValue")
-let llvmBuildFreeze = lazy (NativeLibrary.getFunction<LLVMBuildFreezeDelegate> "LLVMBuildFreeze")
-let llvmBuildIsNull = lazy (NativeLibrary.getFunction<LLVMBuildIsNullDelegate> "LLVMBuildIsNull")
-let llvmBuildIsNotNull = lazy (NativeLibrary.getFunction<LLVMBuildIsNotNullDelegate> "LLVMBuildIsNotNull")
-let llvmBuildPtrDiff2 = lazy (NativeLibrary.getFunction<LLVMBuildPtrDiff2Delegate> "LLVMBuildPtrDiff2")
-let llvmBuildFence = lazy (NativeLibrary.getFunction<LLVMBuildFenceDelegate> "LLVMBuildFence")
-let llvmBuildAtomicRMW = lazy (NativeLibrary.getFunction<LLVMBuildAtomicRMWDelegate> "LLVMBuildAtomicRMW")
-let llvmBuildAtomicCmpXchg = lazy (NativeLibrary.getFunction<LLVMBuildAtomicCmpXchgDelegate> "LLVMBuildAtomicCmpXchg")
-
-// Atomic helpers
-let llvmIsAtomicSingleThread = lazy (NativeLibrary.getFunction<LLVMIsAtomicSingleThreadDelegate> "LLVMIsAtomicSingleThread")
-let llvmSetAtomicSingleThread = lazy (NativeLibrary.getFunction<LLVMSetAtomicSingleThreadDelegate> "LLVMSetAtomicSingleThread")
-
-// PHI Node Functions
-let llvmAddIncoming = lazy (NativeLibrary.getFunction<LLVMAddIncomingDelegate> "LLVMAddIncoming")
-let llvmCountIncoming = lazy (NativeLibrary.getFunction<LLVMCountIncomingDelegate> "LLVMCountIncoming")
-let llvmGetIncomingValue = lazy (NativeLibrary.getFunction<LLVMGetIncomingValueDelegate> "LLVMGetIncomingValue")
-let llvmGetIncomingBlock = lazy (NativeLibrary.getFunction<LLVMGetIncomingBlockDelegate> "LLVMGetIncomingBlock")
-
-// Instruction Functions
-let llvmHasMetadata = lazy (NativeLibrary.getFunction<LLVMHasMetadataDelegate> "LLVMHasMetadata")
-let llvmGetMetadata = lazy (NativeLibrary.getFunction<LLVMGetMetadataDelegate> "LLVMGetMetadata")
-let llvmSetMetadata = lazy (NativeLibrary.getFunction<LLVMSetMetadataDelegate> "LLVMSetMetadata")
-let llvmGetInstructionParent = lazy (NativeLibrary.getFunction<LLVMGetInstructionParentDelegate> "LLVMGetInstructionParent")
-let llvmGetNextInstruction = lazy (NativeLibrary.getFunction<LLVMGetNextInstructionDelegate> "LLVMGetNextInstruction")
-let llvmGetPreviousInstruction = lazy (NativeLibrary.getFunction<LLVMGetPreviousInstructionDelegate> "LLVMGetPreviousInstruction")
-let llvmInstructionRemoveFromParent = lazy (NativeLibrary.getFunction<LLVMInstructionRemoveFromParentDelegate> "LLVMInstructionRemoveFromParent")
-let llvmInstructionEraseFromParent = lazy (NativeLibrary.getFunction<LLVMInstructionEraseFromParentDelegate> "LLVMInstructionEraseFromParent")
-let llvmDeleteInstruction = lazy (NativeLibrary.getFunction<LLVMDeleteInstructionDelegate> "LLVMDeleteInstruction")
-let llvmGetInstructionOpcode = lazy (NativeLibrary.getFunction<LLVMGetInstructionOpcodeDelegate> "LLVMGetInstructionOpcode")
-let llvmGetICmpPredicate = lazy (NativeLibrary.getFunction<LLVMGetICmpPredicateDelegate> "LLVMGetICmpPredicate")
-let llvmGetFCmpPredicate = lazy (NativeLibrary.getFunction<LLVMGetFCmpPredicateDelegate> "LLVMGetFCmpPredicate")
-let llvmInstructionClone = lazy (NativeLibrary.getFunction<LLVMInstructionCloneDelegate> "LLVMInstructionClone")
-
-// Call site functions
-let llvmGetNumArgOperands = lazy (NativeLibrary.getFunction<LLVMGetNumArgOperandsDelegate> "LLVMGetNumArgOperands")
-let llvmSetInstructionCallConv = lazy (NativeLibrary.getFunction<LLVMSetInstructionCallConvDelegate> "LLVMSetInstructionCallConv")
-let llvmGetInstructionCallConv = lazy (NativeLibrary.getFunction<LLVMGetInstructionCallConvDelegate> "LLVMGetInstructionCallConv")
-let llvmGetCalledFunctionType = lazy (NativeLibrary.getFunction<LLVMGetCalledFunctionTypeDelegate> "LLVMGetCalledFunctionType")
-let llvmGetCalledValue = lazy (NativeLibrary.getFunction<LLVMGetCalledValueDelegate> "LLVMGetCalledValue")
-let llvmIsTailCall = lazy (NativeLibrary.getFunction<LLVMIsTailCallDelegate> "LLVMIsTailCall")
-let llvmSetTailCall = lazy (NativeLibrary.getFunction<LLVMSetTailCallDelegate> "LLVMSetTailCall")
-
-// Terminator functions
-let llvmGetNumSuccessors = lazy (NativeLibrary.getFunction<LLVMGetNumSuccessorsDelegate> "LLVMGetNumSuccessors")
-let llvmGetSuccessor = lazy (NativeLibrary.getFunction<LLVMGetSuccessorDelegate> "LLVMGetSuccessor")
-let llvmSetSuccessor = lazy (NativeLibrary.getFunction<LLVMSetSuccessorDelegate> "LLVMSetSuccessor")
-let llvmIsConditional = lazy (NativeLibrary.getFunction<LLVMIsConditionalDelegate> "LLVMIsConditional")
-let llvmGetCondition = lazy (NativeLibrary.getFunction<LLVMGetConditionDelegate> "LLVMGetCondition")
-let llvmSetCondition = lazy (NativeLibrary.getFunction<LLVMSetConditionDelegate> "LLVMSetCondition")
-let llvmGetSwitchDefaultDest = lazy (NativeLibrary.getFunction<LLVMGetSwitchDefaultDestDelegate> "LLVMGetSwitchDefaultDest")
-
-// Alloca functions
-let llvmGetAllocatedType = lazy (NativeLibrary.getFunction<LLVMGetAllocatedTypeDelegate> "LLVMGetAllocatedType")
-
-// GEP functions
-let llvmIsInBounds = lazy (NativeLibrary.getFunction<LLVMIsInBoundsDelegate> "LLVMIsInBounds")
-let llvmSetIsInBounds = lazy (NativeLibrary.getFunction<LLVMSetIsInBoundsDelegate> "LLVMSetIsInBounds")
-let llvmGetGEPSourceElementType = lazy (NativeLibrary.getFunction<LLVMGetGEPSourceElementTypeDelegate> "LLVMGetGEPSourceElementType")
-
-// Extract/Insert value functions
-let llvmGetNumIndices = lazy (NativeLibrary.getFunction<LLVMGetNumIndicesDelegate> "LLVMGetNumIndices")
-let llvmGetIndices = lazy (NativeLibrary.getFunction<LLVMGetIndicesDelegate> "LLVMGetIndices")
-
-// Pass Manager Functions
-let llvmCreatePassManager = lazy (NativeLibrary.getFunction<LLVMCreatePassManagerDelegate> "LLVMCreatePassManager")
-let llvmCreateFunctionPassManagerForModule = lazy (NativeLibrary.getFunction<LLVMCreateFunctionPassManagerForModuleDelegate> "LLVMCreateFunctionPassManagerForModule")
-let llvmRunPassManager = lazy (NativeLibrary.getFunction<LLVMRunPassManagerDelegate> "LLVMRunPassManager")
-let llvmInitializeFunctionPassManager = lazy (NativeLibrary.getFunction<LLVMInitializeFunctionPassManagerDelegate> "LLVMInitializeFunctionPassManager")
-let llvmRunFunctionPassManager = lazy (NativeLibrary.getFunction<LLVMRunFunctionPassManagerDelegate> "LLVMRunFunctionPassManager")
-let llvmFinalizeFunctionPassManager = lazy (NativeLibrary.getFunction<LLVMFinalizeFunctionPassManagerDelegate> "LLVMFinalizeFunctionPassManager")
-let llvmDisposePassManager = lazy (NativeLibrary.getFunction<LLVMDisposePassManagerDelegate> "LLVMDisposePassManager")
-
-// Optimization Passes
-let llvmAddInstructionCombiningPass = lazy (NativeLibrary.getFunction<LLVMAddInstructionCombiningPassDelegate> "LLVMAddInstructionCombiningPass")
-let llvmAddPromoteMemoryToRegisterPass = lazy (NativeLibrary.getFunction<LLVMAddPromoteMemoryToRegisterPassDelegate> "LLVMAddPromoteMemoryToRegisterPass")
-let llvmAddGVNPass = lazy (NativeLibrary.getFunction<LLVMAddGVNPassDelegate> "LLVMAddGVNPass")
-let llvmAddCFGSimplificationPass = lazy (NativeLibrary.getFunction<LLVMAddCFGSimplificationPassDelegate> "LLVMAddCFGSimplificationPass")
-
-// Target Functions
-let llvmGetDefaultTargetTriple = lazy (NativeLibrary.getFunction<LLVMGetDefaultTargetTripleDelegate> "LLVMGetDefaultTargetTriple")
-let llvmGetHostCPUName = lazy (NativeLibrary.getFunction<LLVMGetHostCPUNameDelegate> "LLVMGetHostCPUName")
-let llvmGetHostCPUFeatures = lazy (NativeLibrary.getFunction<LLVMGetHostCPUFeaturesDelegate> "LLVMGetHostCPUFeatures")
-let llvmInitializeNativeTarget = lazy (NativeLibrary.getFunction<LLVMInitializeNativeTargetDelegate> "LLVMInitializeNativeTarget")
-let llvmInitializeNativeAsmPrinter = lazy (NativeLibrary.getFunction<LLVMInitializeNativeAsmPrinterDelegate> "LLVMInitializeNativeAsmPrinter")
-let llvmGetTargetFromTriple = lazy (NativeLibrary.getFunction<LLVMGetTargetFromTripleDelegate> "LLVMGetTargetFromTriple")
-let llvmGetTargetFromName = lazy (NativeLibrary.getFunction<LLVMGetTargetFromNameDelegate> "LLVMGetTargetFromName")
-let llvmGetTargetName = lazy (NativeLibrary.getFunction<LLVMGetTargetNameDelegate> "LLVMGetTargetName")
-let llvmGetTargetDescription = lazy (NativeLibrary.getFunction<LLVMGetTargetDescriptionDelegate> "LLVMGetTargetDescription")
-let llvmTargetHasJIT = lazy (NativeLibrary.getFunction<LLVMTargetHasJITDelegate> "LLVMTargetHasJIT")
-let llvmTargetHasTargetMachine = lazy (NativeLibrary.getFunction<LLVMTargetHasTargetMachineDelegate> "LLVMTargetHasTargetMachine")
-let llvmTargetHasAsmBackend = lazy (NativeLibrary.getFunction<LLVMTargetHasAsmBackendDelegate> "LLVMTargetHasAsmBackend")
-let llvmCreateTargetMachine = lazy (NativeLibrary.getFunction<LLVMCreateTargetMachineDelegate> "LLVMCreateTargetMachine")
-let llvmDisposeTargetMachine = lazy (NativeLibrary.getFunction<LLVMDisposeTargetMachineDelegate> "LLVMDisposeTargetMachine")
-let llvmGetTargetMachineTarget = lazy (NativeLibrary.getFunction<LLVMGetTargetMachineTargetDelegate> "LLVMGetTargetMachineTarget")
-let llvmGetTargetMachineTriple = lazy (NativeLibrary.getFunction<LLVMGetTargetMachineTripleDelegate> "LLVMGetTargetMachineTriple")
-let llvmGetTargetMachineCPU = lazy (NativeLibrary.getFunction<LLVMGetTargetMachineCPUDelegate> "LLVMGetTargetMachineCPU")
-let llvmGetTargetMachineFeatureString = lazy (NativeLibrary.getFunction<LLVMGetTargetMachineFeatureStringDelegate> "LLVMGetTargetMachineFeatureString")
-let llvmCreateTargetDataLayout = lazy (NativeLibrary.getFunction<LLVMCreateTargetDataLayoutDelegate> "LLVMCreateTargetDataLayout")
-let llvmTargetMachineEmitToFile = lazy (NativeLibrary.getFunction<LLVMTargetMachineEmitToFileDelegate> "LLVMTargetMachineEmitToFile")
-let llvmTargetMachineEmitToMemoryBuffer = lazy (NativeLibrary.getFunction<LLVMTargetMachineEmitToMemoryBufferDelegate> "LLVMTargetMachineEmitToMemoryBuffer")
-
-// Target Data Functions
-let llvmGetModuleDataLayout = lazy (NativeLibrary.getFunction<LLVMGetModuleDataLayoutDelegate> "LLVMGetModuleDataLayout")
-let llvmSetModuleDataLayout = lazy (NativeLibrary.getFunction<LLVMSetModuleDataLayoutDelegate> "LLVMSetModuleDataLayout")
-let llvmCreateTargetData = lazy (NativeLibrary.getFunction<LLVMCreateTargetDataDelegate> "LLVMCreateTargetData")
-let llvmDisposeTargetData = lazy (NativeLibrary.getFunction<LLVMDisposeTargetDataDelegate> "LLVMDisposeTargetData")
-let llvmCopyStringRepOfTargetData = lazy (NativeLibrary.getFunction<LLVMCopyStringRepOfTargetDataDelegate> "LLVMCopyStringRepOfTargetData")
-let llvmPointerSize = lazy (NativeLibrary.getFunction<LLVMPointerSizeDelegate> "LLVMPointerSize")
-let llvmPointerSizeForAS = lazy (NativeLibrary.getFunction<LLVMPointerSizeForASDelegate> "LLVMPointerSizeForAS")
-let llvmIntPtrType = lazy (NativeLibrary.getFunction<LLVMIntPtrTypeDelegate> "LLVMIntPtrType")
-let llvmIntPtrTypeForAS = lazy (NativeLibrary.getFunction<LLVMIntPtrTypeForASDelegate> "LLVMIntPtrTypeForAS")
-let llvmIntPtrTypeInContext = lazy (NativeLibrary.getFunction<LLVMIntPtrTypeInContextDelegate> "LLVMIntPtrTypeInContext")
-let llvmIntPtrTypeForASInContext = lazy (NativeLibrary.getFunction<LLVMIntPtrTypeForASInContextDelegate> "LLVMIntPtrTypeForASInContext")
-let llvmSizeOfTypeInBits = lazy (NativeLibrary.getFunction<LLVMSizeOfTypeInBitsDelegate> "LLVMSizeOfTypeInBits")
-let llvmStoreSizeOfType = lazy (NativeLibrary.getFunction<LLVMStoreSizeOfTypeDelegate> "LLVMStoreSizeOfType")
-let llvmABISizeOfType = lazy (NativeLibrary.getFunction<LLVMABISizeOfTypeDelegate> "LLVMABISizeOfType")
-let llvmABIAlignmentOfType = lazy (NativeLibrary.getFunction<LLVMABIAlignmentOfTypeDelegate> "LLVMABIAlignmentOfType")
-let llvmCallFrameAlignmentOfType = lazy (NativeLibrary.getFunction<LLVMCallFrameAlignmentOfTypeDelegate> "LLVMCallFrameAlignmentOfType")
-let llvmPreferredAlignmentOfType = lazy (NativeLibrary.getFunction<LLVMPreferredAlignmentOfTypeDelegate> "LLVMPreferredAlignmentOfType")
-let llvmPreferredAlignmentOfGlobal = lazy (NativeLibrary.getFunction<LLVMPreferredAlignmentOfGlobalDelegate> "LLVMPreferredAlignmentOfGlobal")
-let llvmElementAtOffset = lazy (NativeLibrary.getFunction<LLVMElementAtOffsetDelegate> "LLVMElementAtOffset")
-let llvmOffsetOfElement = lazy (NativeLibrary.getFunction<LLVMOffsetOfElementDelegate> "LLVMOffsetOfElement")
-
-// Initialization Functions
-let llvmInitializeAllTargetInfos = lazy (NativeLibrary.getFunction<LLVMInitializeAllTargetInfosDelegate> "LLVMInitializeAllTargetInfos")
-let llvmInitializeAllTargets = lazy (NativeLibrary.getFunction<LLVMInitializeAllTargetsDelegate> "LLVMInitializeAllTargets")
-let llvmInitializeAllTargetMCs = lazy (NativeLibrary.getFunction<LLVMInitializeAllTargetMCsDelegate> "LLVMInitializeAllTargetMCs")
-let llvmInitializeAllAsmPrinters = lazy (NativeLibrary.getFunction<LLVMInitializeAllAsmPrintersDelegate> "LLVMInitializeAllAsmPrinters")
-let llvmInitializeAllAsmParsers = lazy (NativeLibrary.getFunction<LLVMInitializeAllAsmParsersDelegate> "LLVMInitializeAllAsmParsers")
-let llvmInitializeAllDisassemblers = lazy (NativeLibrary.getFunction<LLVMInitializeAllDisassemblersDelegate> "LLVMInitializeAllDisassemblers")
-
-// Memory Management Functions
-let llvmDisposeMessage = lazy (NativeLibrary.getFunction<LLVMDisposeMessageDelegate> "LLVMDisposeMessage")
-let llvmShutdown = lazy (NativeLibrary.getFunction<LLVMShutdownDelegate> "LLVMShutdown")
-
-// Version Functions
-let llvmGetVersion = lazy (NativeLibrary.getFunction<LLVMGetVersionDelegate> "LLVMGetVersion")
-
-// Error Handling
-let llvmCreateMessage = lazy (NativeLibrary.getFunction<LLVMCreateMessageDelegate> "LLVMCreateMessage")
-
-// New Pass Manager Functions (PassBuilder)
-let llvmRunPasses = lazy (NativeLibrary.getFunction<LLVMRunPassesDelegate> "LLVMRunPasses")
-let llvmRunPassesOnFunction = lazy (NativeLibrary.getFunction<LLVMRunPassesOnFunctionDelegate> "LLVMRunPassesOnFunction")
-let llvmCreatePassBuilderOptions = lazy (NativeLibrary.getFunction<LLVMCreatePassBuilderOptionsDelegate> "LLVMCreatePassBuilderOptions")
-let llvmPassBuilderOptionsSetVerifyEach = lazy (NativeLibrary.getFunction<LLVMPassBuilderOptionsSetVerifyEachDelegate> "LLVMPassBuilderOptionsSetVerifyEach")
-let llvmPassBuilderOptionsSetDebugLogging = lazy (NativeLibrary.getFunction<LLVMPassBuilderOptionsSetDebugLoggingDelegate> "LLVMPassBuilderOptionsSetDebugLogging")
-let llvmDisposePassBuilderOptions = lazy (NativeLibrary.getFunction<LLVMDisposePassBuilderOptionsDelegate> "LLVMDisposePassBuilderOptions")
-
-// Memory Buffer Functions
-let llvmCreateMemoryBufferWithContentsOfFile = lazy (NativeLibrary.getFunction<LLVMCreateMemoryBufferWithContentsOfFileDelegate> "LLVMCreateMemoryBufferWithContentsOfFile")
-let llvmCreateMemoryBufferWithSTDIN = lazy (NativeLibrary.getFunction<LLVMCreateMemoryBufferWithSTDINDelegate> "LLVMCreateMemoryBufferWithSTDIN")
-let llvmCreateMemoryBufferWithMemoryRange = lazy (NativeLibrary.getFunction<LLVMCreateMemoryBufferWithMemoryRangeDelegate> "LLVMCreateMemoryBufferWithMemoryRange")
-let llvmCreateMemoryBufferWithMemoryRangeCopy = lazy (NativeLibrary.getFunction<LLVMCreateMemoryBufferWithMemoryRangeCopyDelegate> "LLVMCreateMemoryBufferWithMemoryRangeCopy")
-let llvmGetBufferStart = lazy (NativeLibrary.getFunction<LLVMGetBufferStartDelegate> "LLVMGetBufferStart")
-let llvmGetBufferSize = lazy (NativeLibrary.getFunction<LLVMGetBufferSizeDelegate> "LLVMGetBufferSize")
-let llvmDisposeMemoryBuffer = lazy (NativeLibrary.getFunction<LLVMDisposeMemoryBufferDelegate> "LLVMDisposeMemoryBuffer")
-
-// =============================================================================
-// Helper Functions
-// =============================================================================
-
-/// Convenience function to invoke lazy-loaded functions
+// Convenience function to invoke lazy-loaded functions
 let inline invoke (lazyFunc: Lazy<'T>) = lazyFunc.Value

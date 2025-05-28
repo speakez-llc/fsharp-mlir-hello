@@ -12,7 +12,7 @@ exception LLVMException of string
 /// Helper module for working with LLVM strings and memory management
 module internal LLVMStringUtils =
     let stringFromNativePtr (ptr: nativeint) : string =
-        if ptr = nativeint.Zero then
+        if ptr = nativeint 0 then
             ""
         else
             try
@@ -26,7 +26,7 @@ module internal LLVMStringUtils =
     
     let allocateStringArray (strings: string[]) : nativeint * (unit -> unit) =
         if strings.Length = 0 then
-            (nativeint.Zero, fun () -> ())
+            (nativeint 0, fun () -> ())
         else
             let ptr = Marshal.AllocHGlobal(nativeint (strings.Length * sizeof<nativeint>))
             let cleanup = fun () -> Marshal.FreeHGlobal(ptr)
@@ -104,7 +104,7 @@ type LLVMContext(handle: LLVMContextRef) =
         let isVarArgBool = if isVarArg then 1 else 0
         
         if paramTypes.Length = 0 then
-            invoke llvmFunctionType returnType nativeint.Zero 0u isVarArgBool
+            invoke llvmFunctionType returnType nativeint 0 0u isVarArgBool
         else
             let paramTypesPtr = Marshal.AllocHGlobal(nativeint (paramTypes.Length * sizeof<nativeint>))
             try
@@ -120,7 +120,7 @@ type LLVMContext(handle: LLVMContextRef) =
         let packedBool = if packed then 1 else 0
         
         if elementTypes.Length = 0 then
-            invoke llvmStructTypeInContext handle nativeint.Zero 0u packedBool
+            invoke llvmStructTypeInContext handle nativeint 0 0u packedBool
         else
             let elemTypesPtr = Marshal.AllocHGlobal(nativeint (elementTypes.Length * sizeof<nativeint>))
             try
@@ -214,7 +214,7 @@ and LLVMModule(context: LLVMContext, handle: LLVMModuleRef) =
     member this.GetNamedFunction(name: string) =
         if disposed then invalidOp "Module has been disposed"
         let functionHandle = invoke llvmGetNamedFunction handle name
-        if functionHandle = nativeint.Zero then
+        if functionHandle = nativeint 0 then
             None
         else
             Some(new LLVMFunction(functionHandle))
@@ -229,7 +229,7 @@ and LLVMModule(context: LLVMContext, handle: LLVMModuleRef) =
     member this.GetNamedGlobal(name: string) =
         if disposed then invalidOp "Module has been disposed"
         let globalHandle = invoke llvmGetNamedGlobal handle name
-        if globalHandle = nativeint.Zero then
+        if globalHandle = nativeint 0 then
             None
         else
             Some(new LLVMGlobalVariable(globalHandle))
@@ -242,7 +242,7 @@ and LLVMModule(context: LLVMContext, handle: LLVMModuleRef) =
             let result = invoke llvmVerifyModule handle LLVMVerifierFailureAction.ReturnStatus errorPtr
             if result <> 0 then
                 let errorMsgPtr = Marshal.ReadIntPtr(errorPtr)
-                if errorMsgPtr <> nativeint.Zero then
+                if errorMsgPtr <> nativeint 0 then
                     let errorMsg = Marshal.PtrToStringAnsi(errorMsgPtr)
                     invoke llvmDisposeMessage errorMsgPtr
                     Error(errorMsg)
@@ -272,7 +272,7 @@ and LLVMModule(context: LLVMContext, handle: LLVMModuleRef) =
             let result = invoke llvmPrintModuleToFile handle filename errorPtr
             if result <> 0 then
                 let errorMsgPtr = Marshal.ReadIntPtr(errorPtr)
-                if errorMsgPtr <> nativeint.Zero then
+                if errorMsgPtr <> nativeint 0 then
                     let errorMsg = Marshal.PtrToStringAnsi(errorMsgPtr)
                     invoke llvmDisposeMessage errorMsgPtr
                     Error(errorMsg)
@@ -341,7 +341,7 @@ and LLVMFunction(handle: LLVMValueRef) =
     /// Get the entry basic block
     member this.GetEntryBasicBlock() =
         let blockHandle = invoke llvmGetEntryBasicBlock handle
-        if blockHandle = nativeint.Zero then
+        if blockHandle = nativeint 0 then
             None
         else
             Some(new LLVMBasicBlock(blockHandle))
@@ -370,7 +370,7 @@ and LLVMFunction(handle: LLVMValueRef) =
         try
             let namePtr = invoke llvmGetValueName2 handle lengthPtr
             let length = Marshal.ReadIntPtr(lengthPtr)
-            if namePtr = nativeint.Zero || length = nativeint.Zero then
+            if namePtr = nativeint 0 || length = nativeint 0 then
                 ""
             else
                 let bytes = Array.zeroCreate<byte> (int length)
@@ -391,7 +391,7 @@ and LLVMGlobalVariable(handle: LLVMValueRef) =
     /// Get the initializer
     member this.GetInitializer() =
         let initHandle = invoke llvmGetInitializer handle
-        if initHandle = nativeint.Zero then
+        if initHandle = nativeint 0 then
             None
         else
             Some(new LLVMValue(initHandle))
@@ -439,7 +439,7 @@ and LLVMValue(handle: LLVMValueRef) =
         try
             let namePtr = invoke llvmGetValueName2 handle lengthPtr
             let length = Marshal.ReadIntPtr(lengthPtr)
-            if namePtr = nativeint.Zero || length = nativeint.Zero then
+            if namePtr = nativeint 0 || length = nativeint 0 then
                 ""
             else
                 let bytes = Array.zeroCreate<byte> (int length)
@@ -479,7 +479,7 @@ and LLVMBasicBlock(handle: LLVMBasicBlockRef) =
     /// Get the parent function
     member this.GetParent() =
         let functionHandle = invoke llvmGetBasicBlockParent handle
-        if functionHandle = nativeint.Zero then
+        if functionHandle = nativeint 0 then
             None
         else
             Some(new LLVMFunction(functionHandle))
@@ -487,7 +487,7 @@ and LLVMBasicBlock(handle: LLVMBasicBlockRef) =
     /// Get the terminator instruction
     member this.GetTerminator() =
         let termHandle = invoke llvmGetBasicBlockTerminator handle
-        if termHandle = nativeint.Zero then
+        if termHandle = nativeint 0 then
             None
         else
             Some(new LLVMValue(termHandle))
@@ -495,7 +495,7 @@ and LLVMBasicBlock(handle: LLVMBasicBlockRef) =
     /// Get the first instruction
     member this.GetFirstInstruction() =
         let instHandle = invoke llvmGetFirstInstruction handle
-        if instHandle = nativeint.Zero then
+        if instHandle = nativeint 0 then
             None
         else
             Some(new LLVMValue(instHandle))
@@ -503,7 +503,7 @@ and LLVMBasicBlock(handle: LLVMBasicBlockRef) =
     /// Get the last instruction
     member this.GetLastInstruction() =
         let instHandle = invoke llvmGetLastInstruction handle
-        if instHandle = nativeint.Zero then
+        if instHandle = nativeint 0 then
             None
         else
             Some(new LLVMValue(instHandle))
@@ -537,7 +537,7 @@ and LLVMBuilder(context: LLVMContext, handle: LLVMBuilderRef) =
     member this.GetInsertBlock() =
         if disposed then invalidOp "Builder has been disposed"
         let blockHandle = invoke llvmGetInsertBlock handle
-        if blockHandle = nativeint.Zero then
+        if blockHandle = nativeint 0 then
             None
         else
             Some(new LLVMBasicBlock(blockHandle))
@@ -687,7 +687,7 @@ and LLVMBuilder(context: LLVMContext, handle: LLVMBuilderRef) =
         let numIndices = uint32 indices.Length
         
         if indices.Length = 0 then
-            let gepHandle = invoke llvmBuildGEP2 handle ``type`` ptr.Handle nativeint.Zero 0u name
+            let gepHandle = invoke llvmBuildGEP2 handle ``type`` ptr.Handle nativeint 0 0u name
             new LLVMValue(gepHandle)
         else
             let indicesPtr = Marshal.AllocHGlobal(nativeint (indices.Length * sizeof<nativeint>))
@@ -705,7 +705,7 @@ and LLVMBuilder(context: LLVMContext, handle: LLVMBuilderRef) =
         let numIndices = uint32 indices.Length
         
         if indices.Length = 0 then
-            let gepHandle = invoke llvmBuildInBoundsGEP2 handle ``type`` ptr.Handle nativeint.Zero 0u name
+            let gepHandle = invoke llvmBuildInBoundsGEP2 handle ``type`` ptr.Handle nativeint 0 0u name
             new LLVMValue(gepHandle)
         else
             let indicesPtr = Marshal.AllocHGlobal(nativeint (indices.Length * sizeof<nativeint>))
@@ -777,7 +777,7 @@ and LLVMBuilder(context: LLVMContext, handle: LLVMBuilderRef) =
         let numArgs = uint32 args.Length
         
         if args.Length = 0 then
-            let callHandle = invoke llvmBuildCall2 handle functionType function.Handle nativeint.Zero 0u name
+            let callHandle = invoke llvmBuildCall2 handle functionType function.Handle nativeint 0 0u name
             new LLVMValue(callHandle)
         else
             let argsPtr = Marshal.AllocHGlobal(nativeint (args.Length * sizeof<nativeint>))
@@ -879,7 +879,7 @@ type LLVMTargetMachine(handle: LLVMTargetMachineRef) =
             let result = invoke llvmTargetMachineEmitToFile handle module'.Handle filename fileType errorPtr
             if result <> 0 then
                 let errorMsgPtr = Marshal.ReadIntPtr(errorPtr)
-                if errorMsgPtr <> nativeint.Zero then
+                if errorMsgPtr <> nativeint 0 then
                     let errorMsg = Marshal.PtrToStringAnsi(errorMsgPtr)
                     invoke llvmDisposeMessage errorMsgPtr
                     Error(sprintf "Code generation failed: %s" errorMsg)
@@ -907,7 +907,7 @@ type LLVMTargetMachine(handle: LLVMTargetMachineRef) =
             
             if result <> 0 then
                 let errorMsgPtr = Marshal.ReadIntPtr(errorPtr)
-                if errorMsgPtr <> nativeint.Zero then
+                if errorMsgPtr <> nativeint 0 then
                     let errorMsg = Marshal.PtrToStringAnsi(errorMsgPtr)
                     invoke llvmDisposeMessage errorMsgPtr
                     Error(sprintf "Failed to get target for triple '%s': %s" triple errorMsg)
@@ -916,7 +916,7 @@ type LLVMTargetMachine(handle: LLVMTargetMachineRef) =
             else
                 let target = Marshal.ReadIntPtr(targetPtr)
                 let targetMachine = invoke llvmCreateTargetMachine target triple cpu features optLevel relocMode codeModel
-                if targetMachine = nativeint.Zero then
+                if targetMachine = nativeint 0 then
                     Error("Failed to create target machine")
                 else
                     Ok(new LLVMTargetMachine(targetMachine))
@@ -1011,7 +1011,7 @@ module LLVMConstants =
         let length = uint32 values.Length
         
         if values.Length = 0 then
-            let constHandle = invoke llvmConstArray elementType nativeint.Zero 0u
+            let constHandle = invoke llvmConstArray elementType nativeint 0 0u
             new LLVMValue(constHandle)
         else
             let valuesPtr = Marshal.AllocHGlobal(nativeint (values.Length * sizeof<nativeint>))
@@ -1029,7 +1029,7 @@ module LLVMConstants =
         let packedBool = if packed then 1 else 0
         
         if values.Length = 0 then
-            let constHandle = invoke llvmConstStructInContext context.Handle nativeint.Zero 0u packedBool
+            let constHandle = invoke llvmConstStructInContext context.Handle nativeint 0 0u packedBool
             new LLVMValue(constHandle)
         else
             let valuesPtr = Marshal.AllocHGlobal(nativeint (values.Length * sizeof<nativeint>))

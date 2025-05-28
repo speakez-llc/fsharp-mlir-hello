@@ -39,19 +39,25 @@ type MLIRStringRef =
         val mutable data: nativeint
         val mutable length: nativeint
         
-        new(str: string) =
+        new(data: nativeint, length: nativeint) = { data = data; length = length }
+        
+        static member Create(str: string) =
             let bytes = System.Text.Encoding.UTF8.GetBytes(str)
             let ptr = Marshal.AllocHGlobal(bytes.Length)
             Marshal.Copy(bytes, 0, ptr, bytes.Length)
-            { data = ptr; length = nativeint bytes.Length }
+            MLIRStringRef(ptr, nativeint bytes.Length)
             
         member this.ToString() =
-            if this.data <> nativeint.Zero && this.length > nativeint.Zero then
+            if this.data <> nativeint 0 && this.length > nativeint 0 then
                 let bytes = Array.zeroCreate<byte> (int this.length)
                 Marshal.Copy(this.data, bytes, 0, int this.length)
                 System.Text.Encoding.UTF8.GetString(bytes)
             else
                 ""
+                
+        member this.Dispose() =
+            if this.data <> nativeint 0 then
+                Marshal.FreeHGlobal(this.data)
     end
 
 [<StructLayout(LayoutKind.Sequential)>]
@@ -62,6 +68,8 @@ type MLIRLogicalResult =
         member this.IsFailure = this.value = 0y
         static member Success = MLIRLogicalResult(value = 1y)
         static member Failure = MLIRLogicalResult(value = 0y)
+        
+        new(value: int8) = { value = value }
     end
 
 // Diagnostic severity enum
@@ -139,40 +147,52 @@ module private NativeLibrary =
         | PlatformOS.Linux -> "libMLIR.so"
         | _ -> "libMLIR.so"
     
+    // Windows DLL import functions
+    [<DllImport("kernel32.dll", SetLastError = true)>]
+    extern nativeint private LoadLibraryWindows(string lpFileName)
+    
+    [<DllImport("kernel32.dll", SetLastError = true)>]
+    extern nativeint private GetProcAddressWindows(nativeint hModule, string lpProcName)
+    
+    // Unix/Linux/macOS dynamic library functions
+    [<DllImport("libdl.dylib", SetLastError = true)>]
+    extern nativeint private dlopenMacOS(string filename, int flags)
+    
+    [<DllImport("libdl.dylib", SetLastError = true)>]
+    extern nativeint private dlsymMacOS(nativeint handle, string symbol)
+    
+    [<DllImport("libdl.so.2", SetLastError = true)>]
+    extern nativeint private dlopenLinux(string filename, int flags)
+    
+    [<DllImport("libdl.so.2", SetLastError = true)>]
+    extern nativeint private dlsymLinux(nativeint handle, string symbol)
+    
+    let private RTLD_LAZY = 1
+    
     let private libraryHandle = 
         lazy (
             let libName = getLibraryName()
             let handle = 
-                if Environment.OSVersion.Platform = PlatformID.Win32NT then
-                    LoadLibrary(libName)
-                else
-                    dlopen(libName, 1) // RTLD_LAZY
+                match getOS() with
+                | PlatformOS.Windows -> LoadLibraryWindows(libName)
+                | PlatformOS.MacOS -> dlopenMacOS(libName, RTLD_LAZY)
+                | PlatformOS.Linux -> dlopenLinux(libName, RTLD_LAZY)
+                | _ -> dlopenLinux(libName, RTLD_LAZY)
             
-            if handle = nativeint.Zero then
+            if handle = nativeint 0 then
                 failwithf "Failed to load MLIR library: %s" libName
             handle
         )
     
-    [<DllImport("kernel32.dll", SetLastError = true)>]
-    extern nativeint LoadLibrary(string lpFileName)
-    
-    [<DllImport("kernel32.dll", SetLastError = true)>]
-    extern nativeint GetProcAddress(nativeint hModule, string lpProcName)
-    
-    [<DllImport("libdl.so", SetLastError = true)>]
-    extern nativeint dlopen(string filename, int flags)
-    
-    [<DllImport("libdl.so", SetLastError = true)>]
-    extern nativeint dlsym(nativeint handle, string symbol)
-    
     let getFunction<'T> (name: string) : 'T =
         let funcPtr = 
-            if Environment.OSVersion.Platform = PlatformID.Win32NT then
-                GetProcAddress(libraryHandle.Value, name)
-            else
-                dlsym(libraryHandle.Value, name)
+            match getOS() with
+            | PlatformOS.Windows -> GetProcAddressWindows(libraryHandle.Value, name)
+            | PlatformOS.MacOS -> dlsymMacOS(libraryHandle.Value, name)
+            | PlatformOS.Linux -> dlsymLinux(libraryHandle.Value, name)
+            | _ -> dlsymLinux(libraryHandle.Value, name)
         
-        if funcPtr = nativeint.Zero then
+        if funcPtr = nativeint 0 then
             failwithf "Function %s not found in MLIR library" name
         
         Marshal.GetDelegateForFunctionPointer<'T>(funcPtr)
@@ -278,6 +298,22 @@ type mlirOpPassManagerAddPipelineDelegate = delegate of MLIROpPassManager * MLIR
 type mlirOpPrintingFlagsCreateDelegate = delegate of unit -> MLIROpPrintingFlags
 type mlirOpPrintingFlagsDestroyDelegate = delegate of MLIROpPrintingFlags -> unit
 
+// Block and Region Functions
+type mlirRegionCreateDelegate = delegate of unit -> MLIRRegion
+type mlirRegionDestroyDelegate = delegate of MLIRRegion -> unit
+type mlirRegionGetFirstBlockDelegate = delegate of MLIRRegion -> MLIRBlock
+type mlirRegionAppendOwnedBlockDelegate = delegate of MLIRRegion * MLIRBlock -> unit
+type mlirBlockCreateDelegate = delegate of nativeint * nativeint * MLIRLocation -> MLIRBlock
+type mlirBlockDestroyDelegate = delegate of MLIRBlock -> unit
+type mlirBlockGetParentRegionDelegate = delegate of MLIRBlock -> MLIRRegion
+type mlirBlockAppendOwnedOperationDelegate = delegate of MLIRBlock * MLIROperation -> unit
+type mlirBlockAttributeGetDelegate = delegate of MLIRBlock -> MLIRAttribute
+
+// Additional Operations for AST conversion
+type mlirArrayTypeGetDelegate = delegate of MLIRType * uint32 -> MLIRType
+type mlirStringAttributeGetValueDelegate = delegate of MLIRAttribute -> string
+type mlirNamedAttributeGetDelegate = delegate of MLIRAttribute * MLIRAttribute -> MLIRNamedAttribute
+
 // =============================================================================
 // Lazy-loaded Function Instances
 // =============================================================================
@@ -296,6 +332,7 @@ let mlirLocationUnknownGet = lazy (NativeLibrary.getFunction<mlirLocationUnknown
 let mlirLocationFileLineColGet = lazy (NativeLibrary.getFunction<mlirLocationFileLineColGetDelegate> "mlirLocationFileLineColGet")
 let mlirLocationEqual = lazy (NativeLibrary.getFunction<mlirLocationEqualDelegate> "mlirLocationEqual")
 let mlirLocationPrint = lazy (NativeLibrary.getFunction<mlirLocationPrintDelegate> "mlirLocationPrint")
+let mlirLocationDestroy = lazy (NativeLibrary.getFunction<mlirContextDestroyDelegate> "mlirLocationDestroy")
 
 // Module Functions
 let mlirModuleCreateEmpty = lazy (NativeLibrary.getFunction<mlirModuleCreateEmptyDelegate> "mlirModuleCreateEmpty")
@@ -379,18 +416,33 @@ let mlirOpPassManagerAddPipeline = lazy (NativeLibrary.getFunction<mlirOpPassMan
 let mlirOpPrintingFlagsCreate = lazy (NativeLibrary.getFunction<mlirOpPrintingFlagsCreateDelegate> "mlirOpPrintingFlagsCreate")
 let mlirOpPrintingFlagsDestroy = lazy (NativeLibrary.getFunction<mlirOpPrintingFlagsDestroyDelegate> "mlirOpPrintingFlagsDestroy")
 
+// Block and Region Functions
+let mlirRegionCreate = lazy (NativeLibrary.getFunction<mlirRegionCreateDelegate> "mlirRegionCreate")
+let mlirRegionDestroy = lazy (NativeLibrary.getFunction<mlirRegionDestroyDelegate> "mlirRegionDestroy")
+let mlirRegionGetFirstBlock = lazy (NativeLibrary.getFunction<mlirRegionGetFirstBlockDelegate> "mlirRegionGetFirstBlock")
+let mlirRegionAppendOwnedBlock = lazy (NativeLibrary.getFunction<mlirRegionAppendOwnedBlockDelegate> "mlirRegionAppendOwnedBlock")
+let mlirBlockCreate = lazy (NativeLibrary.getFunction<mlirBlockCreateDelegate> "mlirBlockCreate")
+let mlirBlockDestroy = lazy (NativeLibrary.getFunction<mlirBlockDestroyDelegate> "mlirBlockDestroy")
+let mlirBlockGetParentRegion = lazy (NativeLibrary.getFunction<mlirBlockGetParentRegionDelegate> "mlirBlockGetParentRegion")
+let mlirBlockAppendOwnedOperation = lazy (NativeLibrary.getFunction<mlirBlockAppendOwnedOperationDelegate> "mlirBlockAppendOwnedOperation")
+let mlirBlockAttributeGet = lazy (NativeLibrary.getFunction<mlirBlockAttributeGetDelegate> "mlirBlockAttributeGet")
+
+// Additional Operations
+let mlirArrayTypeGet = lazy (NativeLibrary.getFunction<mlirArrayTypeGetDelegate> "mlirArrayTypeGet")
+let mlirStringAttributeGetValue = lazy (NativeLibrary.getFunction<mlirStringAttributeGetValueDelegate> "mlirStringAttributeGetValue")
+let mlirNamedAttributeGet = lazy (NativeLibrary.getFunction<mlirNamedAttributeGetDelegate> "mlirNamedAttributeGet")
+
 // =============================================================================
 // Helper Functions
 // =============================================================================
 
 /// Create a string reference from an F# string
 let createStringRef (str: string) =
-    MLIRStringRef(str)
+    MLIRStringRef.Create(str)
 
 /// Free memory allocated for a string reference
 let freeStringRef (stringRef: MLIRStringRef) =
-    if stringRef.data <> nativeint.Zero then
-        Marshal.FreeHGlobal(stringRef.data)
+    stringRef.Dispose()
 
 /// Convert MLIR string reference to F# string
 let stringFromStringRef (stringRef: MLIRStringRef) =
