@@ -4,11 +4,13 @@ open System
 open System.Runtime.InteropServices
 open FSharpMLIR.PlatformUtils
 
-// Note: setupNativeEnvironment() is now called explicitly by the compiler pipeline
-// This prevents crashes during module initialization
+// =============================================================================
+// MLIR Type Definitions
+// =============================================================================
 
 // MLIR Opaque type handles
 type MLIRContext = nativeint
+type MLIRDialect = nativeint
 type MLIRDialectRegistry = nativeint
 type MLIRLocation = nativeint
 type MLIRModule = nativeint
@@ -19,9 +21,57 @@ type MLIRType = nativeint
 type MLIRAttribute = nativeint
 type MLIRValue = nativeint
 type MLIRPassManager = nativeint
+type MLIROpPassManager = nativeint
+type MLIRPass = nativeint
+type MLIRExternalPass = nativeint
 type MLIRNamedAttribute = nativeint
+type MLIRTypeID = nativeint
+type MLIRAffineMap = nativeint
+type MLIRIntegerSet = nativeint
+type MLIRDiagnostic = nativeint
+type MLIRDialectHandle = nativeint
+type MLIROpPrintingFlags = nativeint
 
-// Float types
+// String reference structure for MLIR
+[<StructLayout(LayoutKind.Sequential)>]
+type MLIRStringRef =
+    struct
+        val mutable data: nativeint
+        val mutable length: nativeint
+        
+        new(str: string) =
+            let bytes = System.Text.Encoding.UTF8.GetBytes(str)
+            let ptr = Marshal.AllocHGlobal(bytes.Length)
+            Marshal.Copy(bytes, 0, ptr, bytes.Length)
+            { data = ptr; length = nativeint bytes.Length }
+            
+        member this.ToString() =
+            if this.data <> nativeint.Zero && this.length > nativeint.Zero then
+                let bytes = Array.zeroCreate<byte> (int this.length)
+                Marshal.Copy(this.data, bytes, 0, int this.length)
+                System.Text.Encoding.UTF8.GetString(bytes)
+            else
+                ""
+    end
+
+[<StructLayout(LayoutKind.Sequential)>]
+type MLIRLogicalResult =
+    struct
+        val mutable value: int8
+        member this.IsSuccess = this.value = 1y
+        member this.IsFailure = this.value = 0y
+        static member Success = MLIRLogicalResult(value = 1y)
+        static member Failure = MLIRLogicalResult(value = 0y)
+    end
+
+// Diagnostic severity enum
+type MLIRDiagnosticSeverity =
+    | Error = 0
+    | Warning = 1
+    | Note = 2
+    | Remark = 3
+
+// Float types enumeration
 type MLIRFloatTypeKind =
     | BF16 = 0
     | F16 = 1
@@ -30,167 +80,321 @@ type MLIRFloatTypeKind =
     | F80 = 4
     | F128 = 5
 
-// MLIR Context Functions
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRContext mlirContextCreate()
+// LLVM Calling Convention
+type MLIRLLVMCConv =
+    | C = 0
+    | Fast = 8
+    | Cold = 9
+    | GHC = 10
+    | HiPE = 11
+    | AnyReg = 13
+    | PreserveMost = 14
+    | PreserveAll = 15
+    | Swift = 16
+    | CXX_FAST_TLS = 17
+    | Tail = 18
+    | CFGuard_Check = 19
+    | SwiftTail = 20
+    | X86_StdCall = 64
+    | X86_FastCall = 65
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void mlirContextDestroy(MLIRContext context)
+// LLVM Linkage types
+type MLIRLLVMLinkage =
+    | External = 0
+    | AvailableExternally = 1
+    | Linkonce = 2
+    | LinkonceODR = 3
+    | Weak = 4
+    | WeakODR = 5
+    | Appending = 6
+    | Internal = 7
+    | Private = 8
+    | ExternWeak = 9
+    | Common = 10
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void mlirContextSetAllowUnregisteredDialects(MLIRContext context, bool allow)
+// LLVM Type Encoding
+type MLIRLLVMTypeEncoding =
+    | Address = 0x1
+    | Boolean = 0x2
+    | ComplexFloat = 0x31
+    | FloatT = 0x4
+    | Signed = 0x5
+    | SignedChar = 0x6
+    | Unsigned = 0x7
+    | UnsignedChar = 0x08
 
-// MLIR Location Functions
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRLocation mlirLocationUnknownGet(MLIRContext context)
+// Callback delegates
+type MLIRStringCallback = delegate of MLIRStringRef * nativeint -> unit
+type MLIRDiagnosticHandler = delegate of MLIRDiagnostic * nativeint -> MLIRLogicalResult
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRLocation mlirLocationFileLineColGet(MLIRContext context, [<MarshalAs(UnmanagedType.LPStr)>] string filename, uint32 line, uint32 col)
+// =============================================================================
+// Dynamic Library Loading
+// =============================================================================
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void mlirLocationDestroy(MLIRLocation location)
+module private NativeLibrary =
+    let private getLibraryName() =
+        match getOS() with
+        | PlatformOS.Windows -> "MLIR.dll"
+        | PlatformOS.MacOS -> "libMLIR.dylib" 
+        | PlatformOS.Linux -> "libMLIR.so"
+        | _ -> "libMLIR.so"
+    
+    let private libraryHandle = 
+        lazy (
+            let libName = getLibraryName()
+            let handle = 
+                if Environment.OSVersion.Platform = PlatformID.Win32NT then
+                    LoadLibrary(libName)
+                else
+                    dlopen(libName, 1) // RTLD_LAZY
+            
+            if handle = nativeint.Zero then
+                failwithf "Failed to load MLIR library: %s" libName
+            handle
+        )
+    
+    [<DllImport("kernel32.dll", SetLastError = true)>]
+    extern nativeint LoadLibrary(string lpFileName)
+    
+    [<DllImport("kernel32.dll", SetLastError = true)>]
+    extern nativeint GetProcAddress(nativeint hModule, string lpProcName)
+    
+    [<DllImport("libdl.so", SetLastError = true)>]
+    extern nativeint dlopen(string filename, int flags)
+    
+    [<DllImport("libdl.so", SetLastError = true)>]
+    extern nativeint dlsym(nativeint handle, string symbol)
+    
+    let getFunction<'T> (name: string) : 'T =
+        let funcPtr = 
+            if Environment.OSVersion.Platform = PlatformID.Win32NT then
+                GetProcAddress(libraryHandle.Value, name)
+            else
+                dlsym(libraryHandle.Value, name)
+        
+        if funcPtr = nativeint.Zero then
+            failwithf "Function %s not found in MLIR library" name
+        
+        Marshal.GetDelegateForFunctionPointer<'T>(funcPtr)
 
-// MLIR Module Functions
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRModule mlirModuleCreateEmpty(MLIRLocation location)
+// =============================================================================
+// Function Delegate Types
+// =============================================================================
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void mlirModuleDestroy(MLIRModule moduleHandle)
+// Context Functions
+type mlirContextCreateDelegate = delegate of unit -> MLIRContext
+type mlirContextDestroyDelegate = delegate of MLIRContext -> unit
+type mlirContextSetAllowUnregisteredDialectsDelegate = delegate of MLIRContext * bool -> unit
+type mlirContextGetAllowUnregisteredDialectsDelegate = delegate of MLIRContext -> bool
+type mlirContextGetNumRegisteredDialectsDelegate = delegate of MLIRContext -> nativeint
+type mlirContextGetNumLoadedDialectsDelegate = delegate of MLIRContext -> nativeint
+type mlirContextAppendDialectRegistryDelegate = delegate of MLIRContext * MLIRDialectRegistry -> unit
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIROperation mlirModuleGetOperation(MLIRModule module')
+// Location Functions
+type mlirLocationUnknownGetDelegate = delegate of MLIRContext -> MLIRLocation
+type mlirLocationFileLineColGetDelegate = delegate of MLIRContext * MLIRStringRef * uint32 * uint32 -> MLIRLocation
+type mlirLocationEqualDelegate = delegate of MLIRLocation * MLIRLocation -> bool
+type mlirLocationPrintDelegate = delegate of MLIRLocation * MLIRStringCallback * nativeint -> unit
 
-// MLIR Operation Functions
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIROperation mlirOperationCreate(
-    [<MarshalAs(UnmanagedType.LPStr)>] string name, 
-    MLIRLocation location, 
-    uint32 numResults, 
-    MLIRType[] resultTypes,
-    uint32 numOperands, 
-    MLIRValue[] operands,
-    uint32 numAttributes, 
-    MLIRNamedAttribute[] attributes,
-    uint32 numRegions, 
-    MLIRRegion[] regions)
+// Module Functions
+type mlirModuleCreateEmptyDelegate = delegate of MLIRLocation -> MLIRModule
+type mlirModuleDestroyDelegate = delegate of MLIRModule -> unit
+type mlirModuleGetOperationDelegate = delegate of MLIRModule -> MLIROperation
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void mlirOperationDestroy(MLIROperation op)
+// Operation Functions
+type mlirOperationCreateDelegate = delegate of MLIRStringRef * MLIRLocation * nativeint * nativeint * nativeint * nativeint * nativeint * nativeint * nativeint * nativeint -> MLIROperation
+type mlirOperationDestroyDelegate = delegate of MLIROperation -> unit
+type mlirOperationGetNumResultsDelegate = delegate of MLIROperation -> nativeint
+type mlirOperationGetResultDelegate = delegate of MLIROperation * nativeint -> MLIRValue
+type mlirOperationSetAttributeByNameDelegate = delegate of MLIROperation * MLIRStringRef * MLIRAttribute -> unit
+type mlirOperationGetAttributeByNameDelegate = delegate of MLIROperation * MLIRStringRef -> MLIRAttribute
+type mlirOperationVerifyDelegate = delegate of MLIROperation -> MLIRLogicalResult
+type mlirOperationDumpDelegate = delegate of MLIROperation -> unit
+type mlirOperationPrintDelegate = delegate of MLIROperation * MLIRStringCallback * nativeint -> unit
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRValue mlirOperationGetResult(MLIROperation op, uint32 pos)
+// Type Functions
+type mlirIntegerTypeGetDelegate = delegate of MLIRContext * uint32 -> MLIRType
+type mlirIntegerTypeSignedGetDelegate = delegate of MLIRContext * uint32 -> MLIRType
+type mlirIntegerTypeUnsignedGetDelegate = delegate of MLIRContext * uint32 -> MLIRType
+type mlirIntegerTypeGetWidthDelegate = delegate of MLIRType -> uint32
+type mlirIndexTypeGetDelegate = delegate of MLIRContext -> MLIRType
+type mlirBF16TypeGetDelegate = delegate of MLIRContext -> MLIRType
+type mlirF16TypeGetDelegate = delegate of MLIRContext -> MLIRType
+type mlirF32TypeGetDelegate = delegate of MLIRContext -> MLIRType
+type mlirF64TypeGetDelegate = delegate of MLIRContext -> MLIRType
+type mlirNoneTypeGetDelegate = delegate of MLIRContext -> MLIRType
+type mlirFunctionTypeGetDelegate = delegate of MLIRContext * nativeint * nativeint * nativeint * nativeint -> MLIRType
+type mlirFunctionTypeGetNumInputsDelegate = delegate of MLIRType -> nativeint
+type mlirFunctionTypeGetNumResultsDelegate = delegate of MLIRType -> nativeint
+type mlirFunctionTypeGetInputDelegate = delegate of MLIRType * nativeint -> MLIRType
+type mlirFunctionTypeGetResultDelegate = delegate of MLIRType * nativeint -> MLIRType
+type mlirTypeIsAIntegerDelegate = delegate of MLIRType -> bool
+type mlirTypeIsAFloatDelegate = delegate of MLIRType -> bool
+type mlirTypeIsAFunctionDelegate = delegate of MLIRType -> bool
+type mlirTypeIsAIndexDelegate = delegate of MLIRType -> bool
+type mlirFloatTypeGetWidthDelegate = delegate of MLIRType -> uint32
+type mlirTypePrintDelegate = delegate of MLIRType * MLIRStringCallback * nativeint -> unit
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void mlirOperationSetAttributeByName(MLIROperation op, [<MarshalAs(UnmanagedType.LPStr)>] string name, MLIRAttribute attribute)
+// Attribute Functions
+type mlirStringAttrGetDelegate = delegate of MLIRContext * MLIRStringRef -> MLIRAttribute
+type mlirBoolAttrGetDelegate = delegate of MLIRContext * int -> MLIRAttribute
+type mlirIntegerAttrGetDelegate = delegate of MLIRType * int64 -> MLIRAttribute
+type mlirFloatAttrDoubleGetDelegate = delegate of MLIRContext * MLIRType * double -> MLIRAttribute
+type mlirTypeAttrGetDelegate = delegate of MLIRType -> MLIRAttribute
+type mlirUnitAttrGetDelegate = delegate of MLIRContext -> MLIRAttribute
+type mlirAttributeIsAStringDelegate = delegate of MLIRAttribute -> bool
+type mlirAttributeIsABoolDelegate = delegate of MLIRAttribute -> bool
+type mlirAttributeIsAIntegerDelegate = delegate of MLIRAttribute -> bool
+type mlirAttributeIsAFloatDelegate = delegate of MLIRAttribute -> bool
+type mlirAttributeIsATypeDelegate = delegate of MLIRAttribute -> bool
+type mlirAttributeIsAUnitDelegate = delegate of MLIRAttribute -> bool
+type mlirStringAttrGetValueDelegate = delegate of MLIRAttribute -> MLIRStringRef
+type mlirBoolAttrGetValueDelegate = delegate of MLIRAttribute -> bool
+type mlirIntegerAttrGetValueIntDelegate = delegate of MLIRAttribute -> int64
+type mlirFloatAttrGetValueDoubleDelegate = delegate of MLIRAttribute -> double
+type mlirTypeAttrGetValueDelegate = delegate of MLIRAttribute -> MLIRType
+type mlirAttributePrintDelegate = delegate of MLIRAttribute * MLIRStringCallback * nativeint -> unit
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern bool mlirOperationVerify(MLIROperation op)
+// Value Functions
+type mlirValueGetTypeDelegate = delegate of MLIRValue -> MLIRType
+type mlirValuePrintDelegate = delegate of MLIRValue * MLIRStringCallback * nativeint -> unit
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRAttribute mlirOperationGetAttributeByName(MLIROperation op, [<MarshalAs(UnmanagedType.LPStr)>] string name)
+// Dialect Registry Functions
+type mlirDialectRegistryCreateDelegate = delegate of unit -> MLIRDialectRegistry
+type mlirDialectRegistryDestroyDelegate = delegate of MLIRDialectRegistry -> unit
+type mlirRegisterAllDialectsDelegate = delegate of MLIRDialectRegistry -> unit
 
-// MLIR Region Functions
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRRegion mlirRegionCreate()
+// Pass Manager Functions
+type mlirPassManagerCreateDelegate = delegate of MLIRContext -> MLIRPassManager
+type mlirPassManagerDestroyDelegate = delegate of MLIRPassManager -> unit
+type mlirPassManagerRunOnOpDelegate = delegate of MLIRPassManager * MLIROperation -> MLIRLogicalResult
+type mlirPassManagerEnableIRPrintingDelegate = delegate of MLIRPassManager * bool * bool * bool * bool * bool * MLIROpPrintingFlags * MLIRStringRef -> unit
+type mlirPassManagerEnableVerifierDelegate = delegate of MLIRPassManager * bool -> unit
+type mlirPassManagerGetNestedUnderDelegate = delegate of MLIRPassManager * MLIRStringRef -> MLIROpPassManager
+type mlirOpPassManagerGetNestedUnderDelegate = delegate of MLIROpPassManager * MLIRStringRef -> MLIROpPassManager
+type mlirOpPassManagerAddPipelineDelegate = delegate of MLIROpPassManager * MLIRStringRef * MLIRStringCallback * nativeint -> MLIRLogicalResult
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void mlirRegionDestroy(MLIRRegion region)
+// Printing Functions
+type mlirOpPrintingFlagsCreateDelegate = delegate of unit -> MLIROpPrintingFlags
+type mlirOpPrintingFlagsDestroyDelegate = delegate of MLIROpPrintingFlags -> unit
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRBlock mlirRegionGetFirstBlock(MLIRRegion region)
+// =============================================================================
+// Lazy-loaded Function Instances
+// =============================================================================
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void mlirRegionAppendOwnedBlock(MLIRRegion region, MLIRBlock block)
+// Context Functions
+let mlirContextCreate = lazy (NativeLibrary.getFunction<mlirContextCreateDelegate> "mlirContextCreate")
+let mlirContextDestroy = lazy (NativeLibrary.getFunction<mlirContextDestroyDelegate> "mlirContextDestroy")
+let mlirContextSetAllowUnregisteredDialects = lazy (NativeLibrary.getFunction<mlirContextSetAllowUnregisteredDialectsDelegate> "mlirContextSetAllowUnregisteredDialects")
+let mlirContextGetAllowUnregisteredDialects = lazy (NativeLibrary.getFunction<mlirContextGetAllowUnregisteredDialectsDelegate> "mlirContextGetAllowUnregisteredDialects")
+let mlirContextGetNumRegisteredDialects = lazy (NativeLibrary.getFunction<mlirContextGetNumRegisteredDialectsDelegate> "mlirContextGetNumRegisteredDialects")
+let mlirContextGetNumLoadedDialects = lazy (NativeLibrary.getFunction<mlirContextGetNumLoadedDialectsDelegate> "mlirContextGetNumLoadedDialects")
+let mlirContextAppendDialectRegistry = lazy (NativeLibrary.getFunction<mlirContextAppendDialectRegistryDelegate> "mlirContextAppendDialectRegistry")
 
-// MLIR Block Functions
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRBlock mlirBlockCreate(uint32 numArguments, MLIRType[] argumentTypes, MLIRLocation[] argumentLocs)
+// Location Functions
+let mlirLocationUnknownGet = lazy (NativeLibrary.getFunction<mlirLocationUnknownGetDelegate> "mlirLocationUnknownGet")
+let mlirLocationFileLineColGet = lazy (NativeLibrary.getFunction<mlirLocationFileLineColGetDelegate> "mlirLocationFileLineColGet")
+let mlirLocationEqual = lazy (NativeLibrary.getFunction<mlirLocationEqualDelegate> "mlirLocationEqual")
+let mlirLocationPrint = lazy (NativeLibrary.getFunction<mlirLocationPrintDelegate> "mlirLocationPrint")
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void mlirBlockDestroy(MLIRBlock block)
+// Module Functions
+let mlirModuleCreateEmpty = lazy (NativeLibrary.getFunction<mlirModuleCreateEmptyDelegate> "mlirModuleCreateEmpty")
+let mlirModuleDestroy = lazy (NativeLibrary.getFunction<mlirModuleDestroyDelegate> "mlirModuleDestroy")
+let mlirModuleGetOperation = lazy (NativeLibrary.getFunction<mlirModuleGetOperationDelegate> "mlirModuleGetOperation")
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void mlirBlockAppendOwnedOperation(MLIRBlock block, MLIROperation operation)
+// Operation Functions
+let mlirOperationCreate = lazy (NativeLibrary.getFunction<mlirOperationCreateDelegate> "mlirOperationCreate")
+let mlirOperationDestroy = lazy (NativeLibrary.getFunction<mlirOperationDestroyDelegate> "mlirOperationDestroy")
+let mlirOperationGetNumResults = lazy (NativeLibrary.getFunction<mlirOperationGetNumResultsDelegate> "mlirOperationGetNumResults")
+let mlirOperationGetResult = lazy (NativeLibrary.getFunction<mlirOperationGetResultDelegate> "mlirOperationGetResult")
+let mlirOperationSetAttributeByName = lazy (NativeLibrary.getFunction<mlirOperationSetAttributeByNameDelegate> "mlirOperationSetAttributeByName")
+let mlirOperationGetAttributeByName = lazy (NativeLibrary.getFunction<mlirOperationGetAttributeByNameDelegate> "mlirOperationGetAttributeByName")
+let mlirOperationVerify = lazy (NativeLibrary.getFunction<mlirOperationVerifyDelegate> "mlirOperationVerify")
+let mlirOperationDump = lazy (NativeLibrary.getFunction<mlirOperationDumpDelegate> "mlirOperationDump")
+let mlirOperationPrint = lazy (NativeLibrary.getFunction<mlirOperationPrintDelegate> "mlirOperationPrint")
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIROperation mlirBlockGetFirstOperation(MLIRBlock block)
+// Type Functions
+let mlirIntegerTypeGet = lazy (NativeLibrary.getFunction<mlirIntegerTypeGetDelegate> "mlirIntegerTypeGet")
+let mlirIntegerTypeSignedGet = lazy (NativeLibrary.getFunction<mlirIntegerTypeSignedGetDelegate> "mlirIntegerTypeSignedGet")
+let mlirIntegerTypeUnsignedGet = lazy (NativeLibrary.getFunction<mlirIntegerTypeUnsignedGetDelegate> "mlirIntegerTypeUnsignedGet")
+let mlirIntegerTypeGetWidth = lazy (NativeLibrary.getFunction<mlirIntegerTypeGetWidthDelegate> "mlirIntegerTypeGetWidth")
+let mlirIndexTypeGet = lazy (NativeLibrary.getFunction<mlirIndexTypeGetDelegate> "mlirIndexTypeGet")
+let mlirBF16TypeGet = lazy (NativeLibrary.getFunction<mlirBF16TypeGetDelegate> "mlirBF16TypeGet")
+let mlirF16TypeGet = lazy (NativeLibrary.getFunction<mlirF16TypeGetDelegate> "mlirF16TypeGet")
+let mlirF32TypeGet = lazy (NativeLibrary.getFunction<mlirF32TypeGetDelegate> "mlirF32TypeGet")
+let mlirF64TypeGet = lazy (NativeLibrary.getFunction<mlirF64TypeGetDelegate> "mlirF64TypeGet")
+let mlirNoneTypeGet = lazy (NativeLibrary.getFunction<mlirNoneTypeGetDelegate> "mlirNoneTypeGet")
+let mlirFunctionTypeGet = lazy (NativeLibrary.getFunction<mlirFunctionTypeGetDelegate> "mlirFunctionTypeGet")
+let mlirFunctionTypeGetNumInputs = lazy (NativeLibrary.getFunction<mlirFunctionTypeGetNumInputsDelegate> "mlirFunctionTypeGetNumInputs")
+let mlirFunctionTypeGetNumResults = lazy (NativeLibrary.getFunction<mlirFunctionTypeGetNumResultsDelegate> "mlirFunctionTypeGetNumResults")
+let mlirFunctionTypeGetInput = lazy (NativeLibrary.getFunction<mlirFunctionTypeGetInputDelegate> "mlirFunctionTypeGetInput")
+let mlirFunctionTypeGetResult = lazy (NativeLibrary.getFunction<mlirFunctionTypeGetResultDelegate> "mlirFunctionTypeGetResult")
+let mlirTypeIsAInteger = lazy (NativeLibrary.getFunction<mlirTypeIsAIntegerDelegate> "mlirTypeIsAInteger")
+let mlirTypeIsAFloat = lazy (NativeLibrary.getFunction<mlirTypeIsAFloatDelegate> "mlirTypeIsAFloat")
+let mlirTypeIsAFunction = lazy (NativeLibrary.getFunction<mlirTypeIsAFunctionDelegate> "mlirTypeIsAFunction")
+let mlirTypeIsAIndex = lazy (NativeLibrary.getFunction<mlirTypeIsAIndexDelegate> "mlirTypeIsAIndex")
+let mlirFloatTypeGetWidth = lazy (NativeLibrary.getFunction<mlirFloatTypeGetWidthDelegate> "mlirFloatTypeGetWidth")
+let mlirTypePrint = lazy (NativeLibrary.getFunction<mlirTypePrintDelegate> "mlirTypePrint")
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIROperation mlirBlockGetTerminator(MLIRBlock block)
+// Attribute Functions
+let mlirStringAttrGet = lazy (NativeLibrary.getFunction<mlirStringAttrGetDelegate> "mlirStringAttrGet")
+let mlirBoolAttrGet = lazy (NativeLibrary.getFunction<mlirBoolAttrGetDelegate> "mlirBoolAttrGet")
+let mlirIntegerAttrGet = lazy (NativeLibrary.getFunction<mlirIntegerAttrGetDelegate> "mlirIntegerAttrGet")
+let mlirFloatAttrDoubleGet = lazy (NativeLibrary.getFunction<mlirFloatAttrDoubleGetDelegate> "mlirFloatAttrDoubleGet")
+let mlirTypeAttrGet = lazy (NativeLibrary.getFunction<mlirTypeAttrGetDelegate> "mlirTypeAttrGet")
+let mlirUnitAttrGet = lazy (NativeLibrary.getFunction<mlirUnitAttrGetDelegate> "mlirUnitAttrGet")
+let mlirAttributeIsAString = lazy (NativeLibrary.getFunction<mlirAttributeIsAStringDelegate> "mlirAttributeIsAString")
+let mlirAttributeIsABool = lazy (NativeLibrary.getFunction<mlirAttributeIsABoolDelegate> "mlirAttributeIsABool")
+let mlirAttributeIsAInteger = lazy (NativeLibrary.getFunction<mlirAttributeIsAIntegerDelegate> "mlirAttributeIsAInteger")
+let mlirAttributeIsAFloat = lazy (NativeLibrary.getFunction<mlirAttributeIsAFloatDelegate> "mlirAttributeIsAFloat")
+let mlirAttributeIsAType = lazy (NativeLibrary.getFunction<mlirAttributeIsATypeDelegate> "mlirAttributeIsAType")
+let mlirAttributeIsAUnit = lazy (NativeLibrary.getFunction<mlirAttributeIsAUnitDelegate> "mlirAttributeIsAUnit")
+let mlirStringAttrGetValue = lazy (NativeLibrary.getFunction<mlirStringAttrGetValueDelegate> "mlirStringAttrGetValue")
+let mlirBoolAttrGetValue = lazy (NativeLibrary.getFunction<mlirBoolAttrGetValueDelegate> "mlirBoolAttrGetValue")
+let mlirIntegerAttrGetValueInt = lazy (NativeLibrary.getFunction<mlirIntegerAttrGetValueIntDelegate> "mlirIntegerAttrGetValueInt")
+let mlirFloatAttrGetValueDouble = lazy (NativeLibrary.getFunction<mlirFloatAttrGetValueDoubleDelegate> "mlirFloatAttrGetValueDouble")
+let mlirTypeAttrGetValue = lazy (NativeLibrary.getFunction<mlirTypeAttrGetValueDelegate> "mlirTypeAttrGetValue")
+let mlirAttributePrint = lazy (NativeLibrary.getFunction<mlirAttributePrintDelegate> "mlirAttributePrint")
 
-// MLIR Type Functions
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRType mlirIntegerTypeGet(MLIRContext context, uint32 width)
+// Value Functions
+let mlirValueGetType = lazy (NativeLibrary.getFunction<mlirValueGetTypeDelegate> "mlirValueGetType")
+let mlirValuePrint = lazy (NativeLibrary.getFunction<mlirValuePrintDelegate> "mlirValuePrint")
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRType mlirFloatTypeGet(MLIRContext context, MLIRFloatTypeKind kind)
+// Dialect Registry Functions
+let mlirDialectRegistryCreate = lazy (NativeLibrary.getFunction<mlirDialectRegistryCreateDelegate> "mlirDialectRegistryCreate")
+let mlirDialectRegistryDestroy = lazy (NativeLibrary.getFunction<mlirDialectRegistryDestroyDelegate> "mlirDialectRegistryDestroy")
+let mlirRegisterAllDialects = lazy (NativeLibrary.getFunction<mlirRegisterAllDialectsDelegate> "mlirRegisterAllDialects")
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRType mlirFunctionTypeGet(
-    MLIRContext context, 
-    uint32 numInputs, 
-    MLIRType[] inputs, 
-    uint32 numResults, 
-    MLIRType[] results)
+// Pass Manager Functions
+let mlirPassManagerCreate = lazy (NativeLibrary.getFunction<mlirPassManagerCreateDelegate> "mlirPassManagerCreate")
+let mlirPassManagerDestroy = lazy (NativeLibrary.getFunction<mlirPassManagerDestroyDelegate> "mlirPassManagerDestroy")
+let mlirPassManagerRunOnOp = lazy (NativeLibrary.getFunction<mlirPassManagerRunOnOpDelegate> "mlirPassManagerRunOnOp")
+let mlirPassManagerEnableIRPrinting = lazy (NativeLibrary.getFunction<mlirPassManagerEnableIRPrintingDelegate> "mlirPassManagerEnableIRPrinting")
+let mlirPassManagerEnableVerifier = lazy (NativeLibrary.getFunction<mlirPassManagerEnableVerifierDelegate> "mlirPassManagerEnableVerifier")
+let mlirPassManagerGetNestedUnder = lazy (NativeLibrary.getFunction<mlirPassManagerGetNestedUnderDelegate> "mlirPassManagerGetNestedUnder")
+let mlirOpPassManagerGetNestedUnder = lazy (NativeLibrary.getFunction<mlirOpPassManagerGetNestedUnderDelegate> "mlirOpPassManagerGetNestedUnder")
+let mlirOpPassManagerAddPipeline = lazy (NativeLibrary.getFunction<mlirOpPassManagerAddPipelineDelegate> "mlirOpPassManagerAddPipeline")
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRType mlirArrayTypeGet(MLIRType elementType, uint32 size)
+// Printing Functions
+let mlirOpPrintingFlagsCreate = lazy (NativeLibrary.getFunction<mlirOpPrintingFlagsCreateDelegate> "mlirOpPrintingFlagsCreate")
+let mlirOpPrintingFlagsDestroy = lazy (NativeLibrary.getFunction<mlirOpPrintingFlagsDestroyDelegate> "mlirOpPrintingFlagsDestroy")
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRType mlirStructTypeGet(MLIRContext context, uint32 numElements, MLIRType[] elements, uint32 numNames, [<MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPStr)>] string[] names)
+// =============================================================================
+// Helper Functions
+// =============================================================================
 
-// MLIR Attribute Functions
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRAttribute mlirStringAttrGet(MLIRContext context, uint32 length, [<MarshalAs(UnmanagedType.LPStr)>] string value)
+/// Create a string reference from an F# string
+let createStringRef (str: string) =
+    MLIRStringRef(str)
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRAttribute mlirIntegerAttrGet(MLIRType typeArg, int64 value)
+/// Free memory allocated for a string reference
+let freeStringRef (stringRef: MLIRStringRef) =
+    if stringRef.data <> nativeint.Zero then
+        Marshal.FreeHGlobal(stringRef.data)
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRAttribute mlirFloatAttrGet(MLIRType typeArg, double value)
+/// Convert MLIR string reference to F# string
+let stringFromStringRef (stringRef: MLIRStringRef) =
+    stringRef.ToString()
 
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRAttribute mlirBoolAttrGet(MLIRContext context, bool value)
-
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRAttribute mlirTypeAttrGet(MLIRType typeArg)
-
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRAttribute mlirBlockAttributeGet(MLIRBlock block)
-
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRNamedAttribute mlirNamedAttributeGet(MLIRAttribute name, MLIRAttribute attr)
-
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern string mlirStringAttributeGetValue(MLIRAttribute attr)
-
-// MLIR Dialect Functions
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRDialectRegistry mlirDialectRegistryCreate()
-
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void mlirDialectRegistryDestroy(MLIRDialectRegistry registry)
-
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void mlirContextAppendDialectRegistry(MLIRContext context, MLIRDialectRegistry registry)
-
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void mlirRegisterAllDialects(MLIRDialectRegistry registry)
-
-// MLIR Pass Manager Functions
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern MLIRPassManager mlirPassManagerCreate(MLIRContext context)
-
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void mlirPassManagerDestroy(MLIRPassManager passManager)
-
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern bool mlirPassManagerRun(MLIRPassManager passManager, MLIRModule module')
-
-// MLIR Printing Functions
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern void mlirOperationDump(MLIROperation operation)
-
-// MLIR to LLVM Conversion
-[<DllImport("libMLIR.dylib", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)>]
-extern bool mlirTranslateModuleToLLVMIR(MLIRModule module', nativeint llvmModule, nativeint callback, nativeint userData)
+/// Convenience function to invoke lazy-loaded functions
+let inline invoke (lazyFunc: Lazy<'T>) = lazyFunc.Value
