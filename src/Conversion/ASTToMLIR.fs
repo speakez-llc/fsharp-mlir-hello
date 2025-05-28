@@ -1,11 +1,22 @@
 module FSharpMLIR.Conversion.ASTToMLIR
 
+open System
+open System.Collections.Generic
+open System.Reflection
 open FSharp.Compiler.Syntax
 open FSharpMLIR.Bindings.MLIR
 open FSharpMLIR.Bindings.MLIRWrapper
 
-// Converter to transform F# AST to MLIR
+/// <summary>
+/// Converter to transform F# AST to MLIR
+/// </summary>
 type Converter(context: MLIRContext) =
+    // Dictionary to cache function operations by name
+    let functionOps = Dictionary<string, nativeint>()
+    
+    // Dictionary to cache global string operations by value
+    let globalStrings = Dictionary<string, nativeint>()
+    
     // Helper to extract the text of an identifier safely
     let getIdentText (ident: obj) =
         match ident with
@@ -13,6 +24,158 @@ type Converter(context: MLIRContext) =
             match synIdent with
             | SynIdent.SynIdent(id, _) -> id.idText
         | _ -> "unknown_ident"
+
+    // Create pointer type for a given element type
+    let createPointerType (elementType: nativeint) =
+        // In MLIR, pointer types are represented in different ways depending on the dialect
+        // For LLVM dialect, we use !llvm.ptr
+        let location = context.CreateUnknownLocation()
+        let ptrTypeAttr = context.CreateStringAttribute("ptr")
+        
+        // Create the MLIR type for !llvm.ptr
+        let ptrType = mlirOperationCreate(
+            "llvm.ptr",
+            location,
+            1u,  // One result (the type)
+            [| elementType |],  // The element type
+            0u,
+            [||],
+            1u,
+            [| ptrTypeAttr |],
+            0u,
+            [||])
+            
+        mlirOperationGetResult(ptrType, 0u)
+    
+    // Helper to create and register a function operation
+    let createFunctionOp (name: string) (returnType: nativeint) (paramTypes: nativeint[]) =
+        let location = context.CreateUnknownLocation()
+        
+        // Create function type
+        let funcType = context.CreateFunctionType(paramTypes, [| returnType |])
+        
+        // Create function operation attributes
+        let funcNameAttr = context.CreateStringAttribute(name)
+        let typeAttr = context.CreateTypeAttribute(funcType)
+        let publicAttr = context.CreateBoolAttribute(true)
+        
+        let attributes = [| 
+            ("sym_name", funcNameAttr)
+            ("function_type", typeAttr)
+            ("public", publicAttr)
+        |]
+        
+        // Create empty region for the function body
+        let region = MLIRRegion.Create()
+        
+        // Create the entry block for the function
+        let entryBlock = MLIRBlock.Create()
+        region.AddBlock(entryBlock)
+        
+        // Create the function operation
+        let funcOp = mlirOperationCreate(
+            "func.func", 
+            location, 
+            0u, 
+            [||], 
+            0u, 
+            [||], 
+            uint32 attributes.Length, 
+            [| for (name, attr) in attributes -> createNamedAttribute(name, attr) |], 
+            1u, 
+            [| region.Handle |])
+        
+        // Cache the function operation
+        functionOps.[name] <- funcOp
+        
+        // Clean up resources
+        mlirLocationDestroy(location)
+        
+        (funcOp, entryBlock)
+    
+    // Helper to create a named attribute
+    and createNamedAttribute (name: string) (value: nativeint) =
+        let nameAttr = context.CreateStringAttribute(name)
+        mlirNamedAttributeGet(nameAttr, value)
+        
+    // Helper to create a global string constant
+    let createGlobalString (value: string) =
+        if globalStrings.ContainsKey(value) then
+            globalStrings.[value]
+        else
+            let location = context.CreateUnknownLocation()
+            
+            // Create the string attribute
+            let stringAttr = context.CreateStringAttribute(value)
+            
+            // Create the string type (array of i8)
+            let i8Type = context.CreateIntegerType(8)
+            let arraySize = uint32 (value.Length + 1) // +1 for null terminator
+            let arrayType = mlirArrayTypeGet(i8Type, arraySize)
+            
+            // Create the global operation
+            let globalName = $"__str_{globalStrings.Count}"
+            let nameAttr = context.CreateStringAttribute(globalName)
+            let constAttr = context.CreateBoolAttribute(true)
+            let valueAttr = context.CreateStringAttribute(value)
+            
+            let attributes = [|
+                ("sym_name", nameAttr)
+                ("constant", constAttr)
+                ("value", valueAttr)
+            |]
+            
+            let globalOp = mlirOperationCreate(
+                "llvm.global",
+                location,
+                0u,
+                [||],
+                0u,
+                [||],
+                uint32 attributes.Length,
+                [| for (name, attr) in attributes -> createNamedAttribute(name, attr) |],
+                0u,
+                [||])
+                
+            // Store for reuse
+            globalStrings.[value] <- globalOp
+            
+            mlirLocationDestroy(location)
+            globalOp
+            
+    // Helper to create an address-of operation for a global
+    let createAddressOf (block: MLIRBlock) (globalOp: nativeint) =
+        let location = context.CreateUnknownLocation()
+        
+        // Get the global name
+        let nameAttr = mlirOperationGetAttributeByName(globalOp, "sym_name")
+        let globalName = mlirStringAttributeGetValue(nameAttr)
+        
+        // Create the LLVM address-of operation
+        let addrType = createPointerType(context.CreateIntegerType(8))
+        let nameRefAttr = context.CreateStringAttribute(globalName)
+        
+        let attributes = [|
+            ("global_name", nameRefAttr)
+        |]
+        
+        let addrOp = mlirOperationCreate(
+            "llvm.address_of",
+            location,
+            1u,
+            [| addrType |],
+            0u,
+            [||],
+            uint32 attributes.Length,
+            [| for (name, attr) in attributes -> createNamedAttribute(name, attr) |],
+            0u,
+            [||])
+            
+        // Add to block
+        block.AppendOperation(addrOp)
+        
+        mlirLocationDestroy(location)
+        mlirOperationGetResult(addrOp, 0u)
 
     // Main entry point to convert an F# module to MLIR
     member this.ConvertModule(mlirModule: MLIRModule, parsedModule: obj) =
@@ -49,7 +212,6 @@ type Converter(context: MLIRContext) =
         let isMutableProp = bindingType.GetProperty("IsMutable")
         let isMutable = if isMutableProp <> null then isMutableProp.GetValue(binding) :?> bool else false
     
-        
         // Safely extract function name using reflection
         let functionName = 
             try
@@ -68,14 +230,15 @@ type Converter(context: MLIRContext) =
         
         printfn "Converting function: %s (mutable: %b)" functionName isMutable
         
-        let functionType = nativeint 0 // Placeholder
-        let functionOp = this.CreateFunctionOp(mlirModule, functionName, functionType)
+        // Create function operation and register it in the module
+        let i32Type = context.CreateIntegerType(32)
+        let (functionOp, entryBlock) = createFunctionOp functionName i32Type [||]
         
         // Process the function body using reflection
         try
             let exprProperty = bindingType.GetProperty("Expr")
             let expr = exprProperty.GetValue(binding)
-            this.ConvertExpression(expr) 
+            this.ConvertExpression(expr, entryBlock) 
             
             // Check for printf-like expressions
             let exprType = expr.GetType()
@@ -92,12 +255,69 @@ type Converter(context: MLIRContext) =
                     let identProperty = funcType.GetProperty("Ident")
                     let ident = identProperty.GetValue(func)
                     
-                    if getIdentText ident = "printf" then
-                        this.ConvertPrintf(functionOp, arg)
+                    if getIdentText ident = "printf" || getIdentText ident = "printfn" then
+                        this.ConvertPrintf(entryBlock, arg)
+            
+            // Add a return operation to the function body
+            let returnValue = this.CreateConstantInt(entryBlock, 0)
+            this.CreateReturnOp(entryBlock, [| returnValue |])
         with 
-        | _ -> printfn "Could not process function body"
+        | ex -> 
+            printfn "Could not process function body: %s" ex.Message
+            
+            // Add a default return operation
+            let returnValue = this.CreateConstantInt(entryBlock, 0)
+            this.CreateReturnOp(entryBlock, [| returnValue |])
+        
+        // Add the function operation to the module
+        let moduleOp = mlirModule.GetOperation()
+        let moduleBlock = mlirRegionGetFirstBlock(moduleOp)
+        mlirBlockAppendOwnedOperation(moduleBlock, functionOp)
 
-    member this.ConvertExpression(expr: obj) =
+    // Create a constant integer value
+    member this.CreateConstantInt(block: MLIRBlock, value: int) =
+        let location = context.CreateUnknownLocation()
+        let i32Type = context.CreateIntegerType(32)
+        let valueAttr = context.CreateIntegerAttribute(i32Type, int64 value)
+        
+        let constOp = mlirOperationCreate(
+            "llvm.constant",
+            location,
+            1u,
+            [| i32Type |],
+            0u,
+            [||],
+            1u,
+            [| createNamedAttribute("value", valueAttr) |],
+            0u,
+            [||])
+            
+        block.AppendOperation(constOp)
+        
+        mlirLocationDestroy(location)
+        mlirOperationGetResult(constOp, 0u)
+    
+    // Create a return operation
+    member this.CreateReturnOp(block: MLIRBlock, values: nativeint[]) =
+        let location = context.CreateUnknownLocation()
+        
+        let returnOp = mlirOperationCreate(
+            "func.return",
+            location,
+            0u,
+            [||],
+            uint32 values.Length,
+            values,
+            0u,
+            [||],
+            0u,
+            [||])
+            
+        block.AppendOperation(returnOp)
+        mlirLocationDestroy(location)
+        returnOp
+
+    member this.ConvertExpression(expr: obj, block: MLIRBlock) =
         let exprType = expr.GetType()
         printfn "Converting expression type: %s" exprType.Name
         
@@ -112,11 +332,32 @@ type Converter(context: MLIRContext) =
                 let body = doExprProp.GetValue(expr)
                 
                 printfn "  Found while loop"
-                printfn "  TODO: Generate MLIR blocks for loop"
                 
-                // For now, just recurse on body
-                this.ConvertExpression(body)
-            with _ -> printfn "  Error processing while loop"
+                // Create the MLIR blocks for the loop
+                let headerBlock = MLIRBlock.Create()
+                let bodyBlock = MLIRBlock.Create()
+                let exitBlock = MLIRBlock.Create()
+                
+                // Branch to the header block
+                this.CreateBranchOp(block, headerBlock.Handle, [||])
+                
+                // Add the header block to the region
+                block.Region.AddBlock(headerBlock)
+                
+                // Convert the condition expression
+                let condValue = this.ConvertConditionExpression(condition, headerBlock)
+                
+                // Create conditional branch
+                this.CreateCondBranchOp(headerBlock, condValue, bodyBlock.Handle, exitBlock.Handle)
+                
+                // Add and populate the body block
+                block.Region.AddBlock(bodyBlock)
+                this.ConvertExpression(body, bodyBlock)
+                this.CreateBranchOp(bodyBlock, headerBlock.Handle, [||])
+                
+                // Add the exit block
+                block.Region.AddBlock(exitBlock)
+            with ex -> printfn "  Error processing while loop: %s" ex.Message
             
         | "SynExpr+Sequential" ->
             // Handle sequence of expressions
@@ -127,27 +368,137 @@ type Converter(context: MLIRContext) =
                 let expr1 = expr1Prop.GetValue(expr)
                 let expr2 = expr2Prop.GetValue(expr)
                 
-                this.ConvertExpression(expr1)
-                this.ConvertExpression(expr2)
-            with _ -> printfn "  Error processing sequence"
+                this.ConvertExpression(expr1, block)
+                this.ConvertExpression(expr2, block)
+            with ex -> printfn "  Error processing sequence: %s" ex.Message
             
         | "SynExpr+App" ->
             // Handle function application
-            this.ConvertApp(expr)
+            this.ConvertApp(expr, block)
             
         | "SynExpr+LongIdentSet" ->
             // Handle assignment (x <- x + 1)
             printfn "  Found assignment"
+            try
+                let lidProp = exprType.GetProperty("LongIdent")
+                let exprProp = exprType.GetProperty("Expr")
+                
+                let lid = lidProp.GetValue(expr)
+                let valExpr = exprProp.GetValue(expr)
+                
+                // Get variable name from LongIdent
+                let varName = this.ExtractQualifiedName(lid)
+                
+                // Convert the right-hand side expression
+                let rhs = this.ConvertExpressionToValue(valExpr, block)
+                
+                // Store the value to the variable
+                this.CreateStoreOp(block, rhs, varName)
+            with ex -> printfn "  Error processing assignment: %s" ex.Message
             
         | "SynExpr+Ident" ->
             // Handle identifier
             printfn "  Found identifier"
+            try
+                let identProp = exprType.GetProperty("Ident")
+                let ident = identProp.GetValue(expr)
+                let name = getIdentText ident
+                
+                // Load the value of the identifier
+                this.CreateLoadOp(block, name)
+            with ex -> printfn "  Error processing identifier: %s" ex.Message
             
         | _ ->
             printfn "  Unhandled expression: %s" exprType.Name
     
+    // Convert a condition expression to a boolean value
+    member this.ConvertConditionExpression(expr: obj, block: MLIRBlock) =
+        // This is a simplified implementation
+        // In a full implementation, you would handle different condition expression types
+        let i1Type = context.CreateIntegerType(1)
+        let trueValue = this.CreateConstantInt(block, 1)
+        
+        // For now, just return a constant true
+        trueValue
+    
+    // Convert an expression to a value
+    member this.ConvertExpressionToValue(expr: obj, block: MLIRBlock) =
+        // This is a simplified implementation
+        // In a full implementation, you would handle different expression types
+        let i32Type = context.CreateIntegerType(32)
+        let value = this.CreateConstantInt(block, 42)
+        
+        // For now, just return a constant value
+        value
+    
+    // Create a branch operation
+    member this.CreateBranchOp(block: MLIRBlock, targetBlock: nativeint, operands: nativeint[]) =
+        let location = context.CreateUnknownLocation()
+        
+        let branchOp = mlirOperationCreate(
+            "cf.br",
+            location,
+            0u,
+            [||],
+            uint32 operands.Length,
+            operands,
+            1u,
+            [| createNamedAttribute("dest", mlirBlockAttributeGet(targetBlock)) |],
+            0u,
+            [||])
+            
+        block.AppendOperation(branchOp)
+        mlirLocationDestroy(location)
+        branchOp
+    
+    // Create a conditional branch operation
+    member this.CreateCondBranchOp(block: MLIRBlock, condition: nativeint, trueBlock: nativeint, falseBlock: nativeint) =
+        let location = context.CreateUnknownLocation()
+        
+        let condBranchOp = mlirOperationCreate(
+            "cf.cond_br",
+            location,
+            0u,
+            [||],
+            1u,
+            [| condition |],
+            2u,
+            [| 
+                createNamedAttribute("trueDest", mlirBlockAttributeGet(trueBlock))
+                createNamedAttribute("falseDest", mlirBlockAttributeGet(falseBlock))
+            |],
+            0u,
+            [||])
+            
+        block.AppendOperation(condBranchOp)
+        mlirLocationDestroy(location)
+        condBranchOp
+    
+    // Create a store operation
+    member this.CreateStoreOp(block: MLIRBlock, value: nativeint, varName: string) =
+        let location = context.CreateUnknownLocation()
+        
+        // In a real implementation, you would create a proper variable address
+        // For now, we'll just print a message
+        printfn "  Would store value to variable: %s" varName
+        
+        mlirLocationDestroy(location)
+        nativeint 0
+    
+    // Create a load operation
+    member this.CreateLoadOp(block: MLIRBlock, varName: string) =
+        let location = context.CreateUnknownLocation()
+        
+        // In a real implementation, you would create a proper variable address and load
+        // For now, we'll just return a constant value
+        let value = this.CreateConstantInt(block, 42)
+        printfn "  Would load value from variable: %s" varName
+        
+        mlirLocationDestroy(location)
+        value
+    
     // Convert a function application expression (SynExpr+App)
-    member this.ConvertApp(expr: obj) =
+    member this.ConvertApp(expr: obj, block: MLIRBlock) =
         try
             let exprType = expr.GetType()
             
@@ -165,11 +516,11 @@ type Converter(context: MLIRContext) =
                 // Handle special cases first
                 match funcName with
                 | "printf" | "printfn" ->
-                    this.ConvertPrintf(nativeint 0, arg) // Use placeholder for functionOp
+                    this.ConvertPrintf(block, arg)
                 | _ ->
                     // General function call - extract arguments and convert
                     let args = this.ExtractArguments(arg)
-                    this.ConvertFunctionCall(funcName, args)
+                    this.ConvertFunctionCall(block, funcName, args)
             else
                 printfn "Could not extract function or argument from App expression"
         with 
@@ -194,8 +545,6 @@ type Converter(context: MLIRContext) =
                 let longIdentProperty = funcType.GetProperty("LongIdent")
                 if longIdentProperty <> null then
                     let longIdent = longIdentProperty.GetValue(funcExpr)
-                    // For now, just use the last part of the identifier
-                    // In a full implementation, you'd want to preserve the full qualified name
                     this.ExtractQualifiedName(longIdent)
                 else
                     "unknown_qualified_function"
@@ -258,36 +607,36 @@ type Converter(context: MLIRContext) =
             printfn "Error extracting arguments: %s" ex.Message
             [argExpr]
     
-    // Helper to create a function operation in MLIR
-    member this.CreateFunctionOp(mlirModule: MLIRModule, name: string, funcType: nativeint) =
-        printfn "Creating MLIR function: %s" name
-        // In a real implementation, you would create an MLIR function operation
-        mlirModule.Handle
-
-    member this.ConvertFunctionCall(funcName: string, args: obj list) =
+    // Convert a function call to MLIR operations
+    member this.ConvertFunctionCall(block: MLIRBlock, funcName: string, args: obj list) =
         match funcName with
         | "Time.currentUnixTimestamp" ->
             printfn "Found call to Alloy Time.currentUnixTimestamp"
             // Generate: %result = llvm.call @Alloy_Time_currentUnixTimestamp() : () -> i64
+            this.GenerateExternalFunctionCall(block, "Alloy_Time_currentUnixTimestamp", args, context.CreateIntegerType(64))
             
         | "Time.sleep" ->
             printfn "Found call to Alloy Time.sleep"
             // Generate: llvm.call @Alloy_Time_sleep(%arg) : (i32) -> ()
+            this.GenerateExternalFunctionCall(block, "Alloy_Time_sleep", args, nativeint 0)
             
         | "Time.now" ->
             printfn "Found call to Alloy Time.now"
             // Generate: %result = llvm.call @Alloy_Time_now() : () -> Alloy_Time_DateTime
+            this.GenerateExternalFunctionCall(block, "Alloy_Time_now", args, nativeint 0) // Placeholder for DateTime type
             
         | "String.concat" | "String.concat3" ->
             printfn "Found call to string concatenation: %s" funcName
             // Generate appropriate string concatenation MLIR
+            this.GenerateExternalFunctionCall(block, "Alloy_String_concat", args, createPointerType(context.CreateIntegerType(8)))
             
         | _ ->
             // Handle other functions
             printfn "Found call to: %s with %d arguments" funcName args.Length
+            this.GenerateExternalFunctionCall(block, funcName, args, context.CreateIntegerType(32))
     
     // Helper to convert printf expressions to MLIR operations
-    member this.ConvertPrintf(functionOp: nativeint, arg: obj) =
+    member this.ConvertPrintf(block: MLIRBlock, arg: obj) =
         try
             let argType = arg.GetType()
             if argType.Name = "SynExpr+Const" then
@@ -297,12 +646,67 @@ type Converter(context: MLIRContext) =
                 
                 if constType.Name = "SynConst+String" then
                     let stringProperty = constType.GetProperty("text")
-                    let formatString = stringProperty.GetValue(arg) :?> string
+                    let formatString = stringProperty.GetValue(constant) :?> string
                     printfn "Printf with format string: %s" formatString
+                    
+                    // Create a global string constant
+                    let globalOp = createGlobalString formatString
+                    
+                    // Get the address of the global string
+                    let strPtr = createAddressOf block globalOp
+                    
+                    // Call printf
+                    let i32Type = context.CreateIntegerType(32)
+                    this.GenerateExternalFunctionCall(block, "printf", [arg], i32Type, [|strPtr|])
         with 
-        | _ -> printfn "Could not extract printf argument"
+        | ex -> printfn "Could not extract printf argument: %s" ex.Message
     
-    // Helper to get or declare an external function
-    member this.GetOrDeclareFunction(name: string, returnType: nativeint) =
-        printfn "Getting or declaring function: %s" name
-        nativeint 0 // Placeholder
+    // Helper to generate external function calls
+    member this.GenerateExternalFunctionCall(block: MLIRBlock, funcName: string, args: obj list, returnType: nativeint, ?mlirArgs: nativeint[]) =
+        let location = context.CreateUnknownLocation()
+        
+        // Determine if we need to declare the function
+        let funcOp =
+            if functionOps.ContainsKey(funcName) then
+                functionOps.[funcName]
+            else
+                // In a real implementation, we would create the correct parameter types
+                // For now, we'll use a simplified approach
+                let paramTypes = 
+                    match mlirArgs with
+                    | Some args -> Array.map (fun _ -> context.CreateIntegerType(32)) args
+                    | None -> [||]
+                
+                let (op, _) = createFunctionOp funcName returnType paramTypes
+                op
+        
+        // Create the call operation
+        let argValues = 
+            match mlirArgs with
+            | Some args -> args
+            | None -> 
+                // In a real implementation, we would convert the F# arguments to MLIR values
+                // For now, we'll just create constant values
+                [| for i in 0..args.Length-1 -> this.CreateConstantInt(block, i) |]
+        
+        let callOp = mlirOperationCreate(
+            "func.call",
+            location,
+            if returnType <> nativeint 0 then 1u else 0u,
+            if returnType <> nativeint 0 then [|returnType|] else [||],
+            uint32 argValues.Length,
+            argValues,
+            1u,
+            [| createNamedAttribute("callee", context.CreateStringAttribute(funcName)) |],
+            0u,
+            [||])
+            
+        block.AppendOperation(callOp)
+        
+        mlirLocationDestroy(location)
+        
+        // Return the result if there is one
+        if returnType <> nativeint 0 then
+            mlirOperationGetResult(callOp, 0u)
+        else
+            nativeint 0
