@@ -243,7 +243,7 @@ extern nativeint LLVMConstString(string str, uint32 length, int dontNullTerminat
 #endif
 extern nativeint LLVMGetDefaultTargetTriple()
 
-// Fixed: LLVMInitializeNativeTarget returns int (LLVMBool), not bool
+// FIXED: Use correct LLVM function names
 #if WINDOWS
 [<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
 #elif MACOS
@@ -251,36 +251,42 @@ extern nativeint LLVMGetDefaultTargetTriple()
 #else // Linux
 [<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
 #endif
-extern int LLVMInitializeNativeTargetRaw()
+extern int LLVMInitializeNativeTarget()
 
-// Safe wrapper for LLVMInitializeNativeTarget
-let LLVMInitializeNativeTarget() : bool =
+// FIXED: Use correct LLVM function names  
+#if WINDOWS
+[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
+#elif MACOS
+[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
+#else // Linux
+[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
+#endif
+extern int LLVMInitializeNativeAsmPrinter()
+
+// Safe wrapper for LLVMInitializeNativeTarget - FIXED RECURSION
+let LLVMInitializeNativeTargetSafe() : bool =
     try
-        let result = LLVMInitializeNativeTargetRaw()
+        let result = LLVMInitializeNativeTarget()
         result = 0 // LLVM returns 0 for success
     with
     | ex ->
         printfn "Error calling LLVMInitializeNativeTarget: %s" ex.Message
+        printfn "Exception type: %s" (ex.GetType().Name)
+        if ex.InnerException <> null then
+            printfn "Inner exception: %s" ex.InnerException.Message
         false
 
-// Fixed: LLVMInitializeNativeAsmPrinter returns int (LLVMBool), not bool
-#if WINDOWS
-[<DllImport("LLVM.dll", CallingConvention = CallingConvention.Cdecl)>]
-#elif MACOS
-[<DllImport("libLLVM.dylib", CallingConvention = CallingConvention.Cdecl)>]
-#else // Linux
-[<DllImport("libLLVM.so", CallingConvention = CallingConvention.Cdecl)>]
-#endif
-extern int LLVMInitializeNativeAsmPrinterRaw()
-
-// Safe wrapper for LLVMInitializeNativeAsmPrinter
-let LLVMInitializeNativeAsmPrinter() : bool =
+// Safe wrapper for LLVMInitializeNativeAsmPrinter - FIXED RECURSION
+let LLVMInitializeNativeAsmPrinterSafe() : bool =
     try
-        let result = LLVMInitializeNativeAsmPrinterRaw()
+        let result = LLVMInitializeNativeAsmPrinter()
         result = 0 // LLVM returns 0 for success
     with
     | ex ->
         printfn "Error calling LLVMInitializeNativeAsmPrinter: %s" ex.Message
+        printfn "Exception type: %s" (ex.GetType().Name)
+        if ex.InnerException <> null then
+            printfn "Inner exception: %s" ex.InnerException.Message
         false
 
 #if WINDOWS
@@ -349,6 +355,9 @@ let LLVMTargetMachineEmitToFile(targetMachine: nativeint, module': nativeint, fi
     with
     | ex ->
         printfn "Error calling LLVMTargetMachineEmitToFile: %s" ex.Message
+        printfn "Exception type: %s" (ex.GetType().Name)
+        if ex.InnerException <> null then
+            printfn "Inner exception: %s" ex.InnerException.Message
         false
 
 // String cleanup
@@ -379,6 +388,9 @@ let LLVMVerifyModule(module': nativeint, action: LLVMVerifierFailureAction, outM
     with
     | ex ->
         printfn "Error calling LLVMVerifyModule: %s" ex.Message
+        printfn "Exception type: %s" (ex.GetType().Name)
+        if ex.InnerException <> null then
+            printfn "Inner exception: %s" ex.InnerException.Message
         true // Assume error if we can't verify
 
 // LLVM Pass Manager
@@ -417,6 +429,9 @@ let LLVMRunPassManager(pm: nativeint, m: nativeint) : bool =
     with
     | ex ->
         printfn "Error calling LLVMRunPassManager: %s" ex.Message
+        printfn "Exception type: %s" (ex.GetType().Name)
+        if ex.InnerException <> null then
+            printfn "Inner exception: %s" ex.InnerException.Message
         false
 
 // Common optimization passes
@@ -469,4 +484,7 @@ let LLVMGetDefaultTargetTripleString() : string =
     with
     | ex ->
         printfn "Error getting default target triple: %s" ex.Message
+        printfn "Exception type: %s" (ex.GetType().Name)
+        if ex.InnerException <> null then
+            printfn "Inner exception: %s" ex.InnerException.Message
         "unknown-unknown-unknown"
