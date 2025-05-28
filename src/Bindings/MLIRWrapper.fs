@@ -77,19 +77,19 @@ type MLIRContext(handle: nativeint) =
     /// Create an integer attribute
     /// </summary>
     member this.CreateIntegerAttribute(``type``: nativeint, value: int64) =
-        mlirIntegerAttrGet(type, value)
+        mlirIntegerAttrGet(``type``, value)
     
     /// <summary>
     /// Create a float attribute
     /// </summary>
     member this.CreateFloatAttribute(``type``: nativeint, value: double) =
-        mlirFloatAttrGet(type, value)
+        mlirFloatAttrGet(``type``, value)
         
     /// <summary>
     /// Create a type attribute
     /// </summary>
     member this.CreateTypeAttribute(``type``: nativeint) =
-        mlirTypeAttrGet(type)
+        mlirTypeAttrGet(``type``)
         
     /// <summary>
     /// Create a block attribute
@@ -97,9 +97,6 @@ type MLIRContext(handle: nativeint) =
     member this.CreateBlockAttribute(block: nativeint) =
         mlirBlockAttributeGet(block)
     
-    /// <summary>
-    /// Implement IDisposable to clean up resources
-    /// </summary>
     interface IDisposable with
         member this.Dispose() = 
             mlirContextDestroy(handle)
@@ -176,9 +173,6 @@ type MLIRModule(context: MLIRContext, handle: nativeint) =
         
         resultString
     
-    /// <summary>
-    /// Implement IDisposable to clean up resources
-    /// </summary>
     interface IDisposable with
         member this.Dispose() = 
             mlirModuleDestroy(handle)
@@ -235,9 +229,6 @@ type MLIRPassManager(context: MLIRContext, handle: nativeint) =
     member this.Run(module': MLIRModule) =
         mlirPassManagerRun(handle, module'.Handle)
     
-    /// <summary>
-    /// Implement IDisposable to clean up resources
-    /// </summary>
     interface IDisposable with
         member this.Dispose() = 
             mlirPassManagerDestroy(handle)
@@ -278,9 +269,6 @@ type MLIRRegion(handle: nativeint) =
         this.AddBlock(block)
         block
     
-    /// <summary>
-    /// Implement IDisposable to clean up resources
-    /// </summary>
     interface IDisposable with
         member this.Dispose() = 
             mlirRegionDestroy(handle)
@@ -331,10 +319,7 @@ and MLIRBlock(handle: nativeint) =
         let newBlock = MLIRBlock.Create()
         newBlock.Region <- this.Region
         newBlock
-    
-    /// <summary>
-    /// Implement IDisposable to clean up resources
-    /// </summary>
+
     interface IDisposable with
         member this.Dispose() = 
             mlirBlockDestroy(handle)
@@ -384,7 +369,7 @@ module MLIRToLLVMConverter =
         
         if success then Ok()
         else Error errorMessage
-        
+
 /// <summary>
 /// Helper functions for creating named attributes
 /// </summary>
